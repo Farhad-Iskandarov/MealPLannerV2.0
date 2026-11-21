@@ -520,4 +520,222 @@ describe('MealPlanner HTTP REST API & Security Integration Tests', () => {
     const chickenIng = updatedRec.ingredients.find((i: any) => i.id === 'ing-gcr-1');
     expect(chickenIng.amount).toBe(750);
   });
+
+  it('serves Google Play public /privacy and /delete-account web portals with HTTP security headers', async () => {
+    const privRes = await fetch(`${baseUrl}/privacy`);
+    expect(privRes.status).toBe(200);
+    expect(privRes.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(privRes.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+    expect(privRes.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
+    expect(privRes.headers.get('permissions-policy')).toContain('camera=()');
+    const privHtml = await privRes.text();
+    expect(privHtml).toContain('MealPlanner — Privacy Policy & Data Protection');
+    expect(privHtml).toContain('Google Play Data Safety Verified');
+    expect(privHtml).toContain('GDPR');
+
+    const delPortalRes = await fetch(`${baseUrl}/delete-account`);
+    expect(delPortalRes.status).toBe(200);
+    const delHtml = await delPortalRes.text();
+    expect(delHtml).toContain('/api/auth/delete-account-web');
+  });
+
+  it('supports Google Play AI-Generated Content Policy reporting via POST /api/ai/report and GET /api/ai/reports', async () => {
+    const badReport = await fetch(`${baseUrl}/api/ai/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reasonCategory: 'other', details: '' }),
+    });
+    expect(badReport.status).toBe(400);
+
+    const reportRes = await fetch(`${baseUrl}/api/ai/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetType: 'recipe',
+        targetId: 'rec-grilled-chicken-rice',
+        reasonCategory: 'allergen_safety',
+        details: 'Please verify sesame trace allergen warning on spice blend.',
+      }),
+    });
+    expect(reportRes.status).toBe(201);
+    const reportBody = await reportRes.json();
+    expect(reportBody.report.id).toContain('air-');
+    expect(reportBody.report.reasonCategory).toBe('allergen_safety');
+
+    const listRes = await fetch(`${baseUrl}/api/ai/reports`);
+    expect(listRes.status).toBe(200);
+    const listBody = await listRes.json();
+    expect(listBody.reports.length).toBeGreaterThanOrEqual(1);
+    expect(listBody.reports[0].targetId).toBe('rec-grilled-chicken-rice');
+  });
+
+  it('supports GDPR Art. 20 Data Export (GET /api/auth/export-data) and In-App Account Deletion (DELETE /api/auth/account) with complete data purge', async () => {
+    // Register a user to test export and in-app deletion
+    const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'kamil.gdpr@mealplanner.pl',
+        password: 'KamilPassword123!',
+        displayName: 'Kamil GDPR',
+        language: 'pl',
+        householdSize: 2,
+        weeklyBudgetPln: 260,
+        preferredSupermarket: 'biedronka',
+      }),
+    });
+    expect(regRes.status).toBe(201);
+    const regData = await regRes.json();
+    const userId = regData.user.id;
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${regData.token}`,
+    };
+
+    // Add a pantry item and an AI report for this user
+    const pantryRes = await fetch(`${baseUrl}/api/pantry`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ namePl: 'Oliwa z oliwek', nameEn: 'Olive Oil', quantity: 500, unit: 'ml' }),
+    });
+    expect(pantryRes.status).toBe(200);
+
+    await fetch(`${baseUrl}/api/ai/report`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        targetType: 'meal_plan',
+        reasonCategory: 'inaccurate_nutrition',
+        details: 'Check calorie estimate',
+      }),
+    });
+
+    // Export GDPR user data
+    const exportRes = await fetch(`${baseUrl}/api/auth/export-data`, {
+      headers: authHeaders,
+    });
+    expect(exportRes.status).toBe(200);
+    const exported = await exportRes.json();
+    expect(exported.account.email).toBe('kamil.gdpr@mealplanner.pl');
+    expect(exported.pantry.length).toBe(1);
+    expect(exported.weeklyPlan.meals.length).toBeGreaterThan(0);
+
+    // Permanently delete account in-app
+    const delRes = await fetch(`${baseUrl}/api/auth/account`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    expect(delRes.status).toBe(200);
+    const delBody = await delRes.json();
+    expect(delBody.deletedUserId).toBe(userId);
+    expect(delBody.purgedTables).toContain('users');
+    expect(delBody.purgedTables).toContain('weekly_plans');
+    expect(delBody.purgedTables).toContain('shopping_lists');
+    expect(delBody.purgedTables).toContain('pantry');
+
+    // Verify user is completely gone from database and cannot log in
+    expect(db.getUserByEmail('kamil.gdpr@mealplanner.pl')).toBeNull();
+    expect(db.getPantryItems(userId).length).toBe(0);
+
+    const loginAfterDel = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'kamil.gdpr@mealplanner.pl',
+        password: 'KamilPassword123!',
+      }),
+    });
+    expect(loginAfterDel.status).toBe(401);
+  });
+
+  it('supports External Web-Based Account Deletion (POST /api/auth/delete-account-web) per Google Play User Data Policy', async () => {
+    const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'webdelete@baku.az',
+        password: 'WebDeletePass123!',
+        displayName: 'Web Delete User',
+        regionCode: 'AZ',
+        currencyCode: 'AZN',
+        language: 'az',
+      }),
+    });
+    expect(regRes.status).toBe(201);
+
+    // Attempt deletion without confirmPermanentDeletion -> 400
+    const unconfirmedRes = await fetch(`${baseUrl}/api/auth/delete-account-web`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'webdelete@baku.az',
+        password: 'WebDeletePass123!',
+        confirmPermanentDeletion: false,
+      }),
+    });
+    expect(unconfirmedRes.status).toBe(400);
+
+    // Confirm permanent deletion via web endpoint -> 200
+    const webDelRes = await fetch(`${baseUrl}/api/auth/delete-account-web`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'webdelete@baku.az',
+        password: 'WebDeletePass123!',
+        confirmPermanentDeletion: true,
+      }),
+    });
+    expect(webDelRes.status).toBe(200);
+    const webDelBody = await webDelRes.json();
+    expect(webDelBody.purgedTables).toContain('users');
+    expect(db.getUserByEmail('webdelete@baku.az')).toBeNull();
+  });
+
+  it('exposes Bazar Store 24h Price Monitoring status, product variants, historical price changes, and live sync via /api/monitoring/*', async () => {
+    const statusRes = await fetch(`${baseUrl}/api/monitoring/status`);
+    expect(statusRes.status).toBe(200);
+    const statusBody = await statusRes.json();
+    expect(statusBody.supermarketId).toBe('bazarstore');
+    expect(statusBody.primaryUrl).toBe('https://bazarstore.az/b%C3%BCt%C3%BCn-m%C9%99hsullar');
+    expect(statusBody.alternativeUrl).toBe('https://bazarstore.az/bütün-məhsullar');
+    expect(statusBody.scheduleIntervalHours).toBe(24);
+    expect(statusBody.totalMonitoredProducts).toBeGreaterThanOrEqual(27);
+
+    const prodsRes = await fetch(`${baseUrl}/api/monitoring/products`);
+    expect(prodsRes.status).toBe(200);
+    const prodsBody = await prodsRes.json();
+    expect(prodsBody.count).toBeGreaterThanOrEqual(27);
+
+    // Trigger a manual price sync with a discounted tomato price at Bazarstore
+    const syncRes = await fetch(`${baseUrl}/api/monitoring/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customItems: [
+          {
+            externalId: 'bz-prod-tomato',
+            ean: '4760112233028',
+            title: 'Zirə çəhrayı pomidoru 500 q',
+            brand: 'Zirə İstixanası',
+            regularPrice: 2.25,
+            discountedPrice: 1.59,
+            isAvailable: true,
+            packageSize: 500,
+            packageUnit: 'g',
+            canonicalIngredient: 'tomato',
+          },
+        ],
+      }),
+    });
+    expect(syncRes.status).toBe(200);
+    const syncBody = await syncRes.json();
+    expect(syncBody.syncRun.status).toBe('SUCCESS');
+    expect(syncBody.syncRun.priceChangesRecorded).toBe(1);
+
+    const histRes = await fetch(`${baseUrl}/api/monitoring/history/tomato`);
+    expect(histRes.status).toBe(200);
+    const histBody = await histRes.json();
+    expect(histBody.history.length).toBeGreaterThanOrEqual(2);
+    expect(histBody.history[0].effectivePrice).toBe(1.59);
+  });
 });

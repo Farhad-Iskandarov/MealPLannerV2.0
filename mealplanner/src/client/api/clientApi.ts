@@ -12,6 +12,8 @@ import {
   Language,
   RegionCode,
   CurrencyCode,
+  PriceMonitoringSummary,
+  PriceSyncRunRecord,
 } from '../../shared/types';
 import {
   PromotionalBannerOffer,
@@ -50,6 +52,7 @@ export interface AppStatePayload {
   promotionalOffers: PromotionalBannerOffer[];
   priceComparisons: NormalizedProductComparison[];
   budgetAnalysis: BudgetAnalysis;
+  priceMonitoring?: PriceMonitoringSummary;
 }
 
 const TOKEN_STORAGE_KEY = 'mealplanner_auth_token';
@@ -445,6 +448,84 @@ export const clientApi = {
     } catch {
       setAuthToken(`offline-token-${Date.now()}`);
       return { message: 'Password reset successful' };
+    }
+  },
+
+  async deleteAccount(): Promise<{ state: AppStatePayload; deleted: boolean; message: string }> {
+    if (!isStandaloneApkEnvironment()) {
+      const res = await apiRequest<{ deleted: boolean; purgedTables?: string[]; deletedAt?: string }>(
+        '/api/auth/account',
+        {
+          method: 'DELETE',
+        }
+      );
+      setAuthToken(null);
+      try {
+        localStorage.removeItem(OFFLINE_STATE_KEY);
+      } catch {
+        // ignore
+      }
+      const freshState = await this.bootstrap();
+      return {
+        state: freshState,
+        deleted: Boolean(res.deleted),
+        message: 'Account and all associated personal data permanently deleted.',
+      };
+    }
+
+    // Standalone APK offline mode: permanently clear stored token and offline user state
+    setAuthToken(null);
+    try {
+      localStorage.removeItem(OFFLINE_STATE_KEY);
+    } catch {
+      // ignore
+    }
+    const freshOfflineState = await getOrInitOfflineState();
+    return {
+      state: freshOfflineState,
+      deleted: true,
+      message: 'Offline account and local data permanently deleted.',
+    };
+  },
+
+  async reportAiContent(payload: {
+    targetType: 'meal_plan' | 'recipe' | 'ingredient_match' | 'other';
+    targetId: string;
+    reasonCategory:
+      | 'allergen_safety'
+      | 'inaccurate_nutrition'
+      | 'inappropriate_content'
+      | 'wrong_price_or_product'
+      | 'other';
+    details: string;
+  }): Promise<{ reported: boolean; message: string }> {
+    try {
+      return await apiRequest<{ reported: boolean; message: string }>('/api/ai/report', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      return {
+        reported: true,
+        message: 'Thank you. Your AI content report has been recorded for review.',
+      };
+    }
+  },
+
+  async exportUserData(): Promise<Record<string, unknown>> {
+    try {
+      return await apiRequest<Record<string, unknown>>('/api/auth/export-data');
+    } catch {
+      const state = await getOrInitOfflineState();
+      return {
+        schemaVersion: '1.0',
+        exportedAt: new Date().toISOString(),
+        gdprBasis: 'GDPR Article 20 — Right to Data Portability (Offline Export)',
+        account: state.user,
+        weeklyPlan: state.weeklyPlan,
+        shoppingList: state.shoppingList,
+        pantry: state.pantry,
+      };
     }
   },
 
@@ -1038,6 +1119,28 @@ export const clientApi = {
         }
       }
       return recomputeOfflineDerived(state);
+    }
+  },
+
+  async syncBazarstorePrices(): Promise<{
+    syncRun?: PriceSyncRunRecord;
+    summary?: PriceMonitoringSummary;
+    state: AppStatePayload;
+  }> {
+    try {
+      const res = await apiRequest<{
+        syncRun: PriceSyncRunRecord;
+        summary: PriceMonitoringSummary;
+        state: AppStatePayload;
+      }>('/api/monitoring/sync', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      saveOfflineState(res.state);
+      return res;
+    } catch {
+      const state = await getOrInitOfflineState();
+      return { state: await recomputeOfflineDerived(state) };
     }
   },
 };

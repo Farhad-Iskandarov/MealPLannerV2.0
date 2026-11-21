@@ -662,7 +662,7 @@ export const SEED_RECIPES: Recipe[] = [
     mealType: 'dinner',
     category: 'Budget-friendly',
     regionSuitability: ['PL', 'AZ'],
-    imageUrl: 'https://images.unsplash.com/photo-1621996346565-e3d5d6281298?auto=format&fit=crop&w=800&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1622973536968-3ead9e780960?auto=format&fit=crop&w=800&q=80',
     prepTimeMin: 5,
     cookTimeMin: 15,
     totalTimeMin: 20,

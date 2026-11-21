@@ -29,6 +29,10 @@ import {
   getCatalogueSupermarketsForRegion,
   getDefaultCurrencyForRegion,
   resolveValidSupermarketForRegion,
+  localizeQuantityLabel,
+  formatMinutes,
+  toLocaleUpper,
+  handleMealImageError,
 } from '../../shared/regionConfig';
 import { getRecipeBaseCostForCurrency } from '../../server/ai/aiMealPlanner';
 import { SupermarketLogo } from './BrandAssets';
@@ -46,7 +50,8 @@ export type ActiveModalType =
   | 'create_recipe'
   | 'auth'
   | 'notifications'
-  | 'privacy';
+  | 'privacy'
+  | 'ai_report';
 
 interface ModalProps {
   activeModal: ActiveModalType;
@@ -65,10 +70,24 @@ interface ModalProps {
   onApplyBudgetSuggestion: (s: any) => Promise<void>;
   onCreateCustomRecipe: (r: any) => Promise<void>;
   onSelectSupermarket: (s: SupermarketSlug) => Promise<void>;
+  onSyncPrices?: () => Promise<void>;
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (data: any) => Promise<void>;
   onRecoverPassword: (email: string) => Promise<{ message: string; recoveryCodeDemo?: string }>;
   onResetPassword: (email: string, code: string, newPass: string) => Promise<void>;
+  onDeleteAccount: () => Promise<void>;
+  onReportAiContent: (payload: {
+    targetType: 'meal_plan' | 'recipe' | 'ingredient_match' | 'other';
+    targetId: string;
+    reasonCategory:
+      | 'allergen_safety'
+      | 'inaccurate_nutrition'
+      | 'inappropriate_content'
+      | 'wrong_price_or_product'
+      | 'other';
+    details: string;
+  }) => Promise<void>;
+  onExportUserData: () => Promise<void>;
   onLogout: () => void;
   onOpenRecipeDetail: (recipe: Recipe) => void;
 }
@@ -90,10 +109,14 @@ export const AppModals: React.FC<ModalProps> = ({
   onApplyBudgetSuggestion,
   onCreateCustomRecipe,
   onSelectSupermarket,
+  onSyncPrices,
   onLogin,
   onRegister,
   onRecoverPassword,
   onResetPassword,
+  onDeleteAccount,
+  onReportAiContent,
+  onExportUserData,
   onLogout,
   onOpenRecipeDetail,
 }) => {
@@ -174,12 +197,20 @@ export const AppModals: React.FC<ModalProps> = ({
   );
 
   // Auth modal state
-  const [authTab, setAuthTab] = useState<'login' | 'register' | 'recover'>('login');
+  const [authTab, setAuthTab] = useState<'login' | 'register' | 'recover' | 'delete'>('login');
   const [authEmail, setAuthEmail] = useState('farhad@email.com');
   const [authPassword, setAuthPassword] = useState('MealPlanner2026!');
   const [authDisplayName, setAuthDisplayName] = useState('Anna Kowalska');
   const [recoveryCodeSent, setRecoveryCodeSent] = useState<string | null>(null);
   const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
+  const [confirmPermanentDelete, setConfirmPermanentDelete] = useState(false);
+
+  // AI Content Reporting state (Google Play AI-Generated Content Policy)
+  const [reportTargetType, setReportTargetType] = useState<'meal_plan' | 'recipe' | 'ingredient_match' | 'other'>('meal_plan');
+  const [reportReason, setReportReason] = useState<
+    'allergen_safety' | 'inaccurate_nutrition' | 'inappropriate_content' | 'wrong_price_or_product' | 'other'
+  >('allergen_safety');
+  const [reportDetails, setReportDetails] = useState('');
 
   if (!activeModal) return null;
 
@@ -372,6 +403,189 @@ export const AppModals: React.FC<ModalProps> = ({
                 )}
               </div>
 
+              {/* Bazar Store 24-Hour Automated Price Monitoring & History Panel */}
+              {state.priceMonitoring && (
+                <div
+                  data-testid="bazarstore-monitor-panel"
+                  style={{
+                    background: '#F4F9F5',
+                    border: '1px solid #CBE4D2',
+                    borderRadius: 12,
+                    padding: '10px 12px',
+                    marginBottom: 12,
+                    fontSize: 11,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      marginBottom: 6,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 800, color: '#145328', fontSize: 12 }}>
+                        📡{' '}
+                        {pickLocalizedText(lang, {
+                          en: 'Bazarstore 24h Automated Price Monitor',
+                          pl: 'Automatyczny 24h Monitoring Cen Bazarstore',
+                          az: 'Bazarstore 24 Saatlıq Avtomatik Qiymət Monitorinqi',
+                        })}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#4A6351' }}>
+                        {pickLocalizedText(lang, {
+                          en: `Source: bazarstore.az/bütün-məhsullar • Last check: ${(state.priceMonitoring.lastSuccessfulSyncAt || '').slice(0, 16).replace('T', ' ')} UTC`,
+                          pl: `Źródło: bazarstore.az/bütün-məhsullar • Ostatni odczyt: ${(state.priceMonitoring.lastSuccessfulSyncAt || '').slice(0, 16).replace('T', ' ')} UTC`,
+                          az: `Mənbə: bazarstore.az/bütün-məhsullar • Son yoxlama: ${(state.priceMonitoring.lastSuccessfulSyncAt || '').slice(0, 16).replace('T', ' ')} UTC`,
+                        })}
+                      </div>
+                    </div>
+                    {onSyncPrices && (
+                      <button
+                        type="button"
+                        data-testid="btn-trigger-price-sync"
+                        disabled={busy}
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            await onSyncPrices();
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: 999,
+                          border: '1px solid #196431',
+                          background: '#196431',
+                          color: '#FFFFFF',
+                          fontSize: 10.5,
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {busy
+                          ? '...'
+                          : pickLocalizedText(lang, {
+                              en: 'Check Prices Now',
+                              pl: 'Sprawdź ceny teraz',
+                              az: 'Qiymətləri indi yoxla',
+                            })}
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                    <span
+                      style={{
+                        background: '#FFFFFF',
+                        border: '1px solid #D5E2D8',
+                        borderRadius: 999,
+                        padding: '2px 8px',
+                        fontWeight: 700,
+                        color: '#1B241E',
+                      }}
+                    >
+                      📦 {state.priceMonitoring.totalMonitoredProducts}{' '}
+                      {pickLocalizedText(lang, {
+                        en: 'monitored variants',
+                        pl: 'monitorowanych wariantów',
+                        az: 'izlənilən məhsul variantı',
+                      })}
+                    </span>
+                    <span
+                      style={{
+                        background: '#DCFCE7',
+                        color: '#166534',
+                        borderRadius: 999,
+                        padding: '2px 8px',
+                        fontWeight: 700,
+                      }}
+                    >
+                      ✓ {state.priceMonitoring.availableProductsCount}{' '}
+                      {pickLocalizedText(lang, {
+                        en: 'in stock',
+                        pl: 'dostępnych',
+                        az: 'stokda var',
+                      })}
+                    </span>
+                    <span
+                      style={{
+                        background:
+                          state.priceMonitoring.outdatedProductsCount > 0 ? '#FEF3C7' : '#FFFFFF',
+                        color:
+                          state.priceMonitoring.outdatedProductsCount > 0 ? '#92400E' : '#4B5563',
+                        border: '1px solid #D5E2D8',
+                        borderRadius: 999,
+                        padding: '2px 8px',
+                        fontWeight: 700,
+                      }}
+                    >
+                      ⏱️ {state.priceMonitoring.outdatedProductsCount}{' '}
+                      {pickLocalizedText(lang, {
+                        en: 'outdated (>48h)',
+                        pl: 'nieaktualnych (>48h)',
+                        az: 'köhnəlmiş (>48s)',
+                      })}
+                    </span>
+                  </div>
+
+                  {state.priceMonitoring.recentPriceChanges.length > 0 && (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        paddingTop: 6,
+                        borderTop: '1px dashed #CBE4D2',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 3,
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, color: '#164A26', fontSize: 10.5 }}>
+                        {pickLocalizedText(lang, {
+                          en: 'Recent Historical Price Changes (Bazarstore AZN ₼):',
+                          pl: 'Ostatnie zmiany cen w historii (Bazarstore AZN ₼):',
+                          az: 'Son Qiymət Dəyişiklikləri Tarixçəsi (Bazarstore AZN ₼):',
+                        })}
+                      </div>
+                      {state.priceMonitoring.recentPriceChanges.slice(0, 3).map((chg) => (
+                        <div
+                          key={chg.id}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            fontSize: 10,
+                            color: '#374151',
+                          }}
+                        >
+                          <span>
+                            {pickLocalizedText(lang, {
+                              en: chg.productNameEn || chg.productNameAz || '',
+                              pl: chg.productNameEn || chg.productNameAz || '',
+                              az: chg.productNameAz || chg.productNameEn || '',
+                            })}
+                          </span>
+                          <span style={{ fontWeight: 800 }}>
+                            {chg.previousEffectivePrice !== null && (
+                              <span style={{ textDecoration: 'line-through', color: '#9CA3AF', marginRight: 4 }}>
+                                {chg.previousEffectivePrice.toFixed(2)} ₼
+                              </span>
+                            )}
+                            <span style={{ color: (chg.priceDelta || 0) <= 0 ? '#15803D' : '#B45309' }}>
+                              {chg.effectivePrice.toFixed(2)} ₼ (
+                              {(chg.priceDelta || 0) > 0 ? `+${chg.priceDelta?.toFixed(2)}` : chg.priceDelta?.toFixed(2)} ₼)
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Transparency Banner */}
               <div
                 style={{
@@ -444,10 +658,10 @@ export const AppModals: React.FC<ModalProps> = ({
                     );
                   })
                   .map((item) => {
-                    const primaryLeft = activeRegion === 'AZ' ? item.bravo : item.biedronka;
-                    const primaryRight = activeRegion === 'AZ' ? item.araz : item.lidl;
-                    const leftTitle = activeRegion === 'AZ' ? '🍏 Bravo' : '🐞 Biedronka';
-                    const rightTitle = activeRegion === 'AZ' ? '🌿 Araz' : '🔵 Lidl';
+                    const primaryLeft = activeRegion === 'AZ' ? item.bazarstore || item.bravo : item.biedronka;
+                    const primaryRight = activeRegion === 'AZ' ? item.bravo : item.lidl;
+                    const leftTitle = activeRegion === 'AZ' ? '🛒 Bazarstore' : '🐞 Biedronka';
+                    const rightTitle = activeRegion === 'AZ' ? '🍏 Bravo' : '🔵 Lidl';
                     return (
                       <div
                         key={item.productId}
@@ -469,7 +683,7 @@ export const AppModals: React.FC<ModalProps> = ({
                                   az: item.nameAz,
                                 })}{' '}
                                 <span style={{ fontWeight: 600, color: '#647067' }}>
-                                  ({item.packageLabelPl})
+                                  ({localizeQuantityLabel(item.packageLabelPl, lang)})
                                 </span>
                               </div>
                               <div style={{ fontSize: 10.5, color: '#647067' }}>
@@ -492,7 +706,7 @@ export const AppModals: React.FC<ModalProps> = ({
                               pl: 'Najtaniej:',
                               az: 'Ən ucuz:',
                             })}{' '}
-                            {item.cheapestStore.toUpperCase()}
+                            {toLocaleUpper(item.cheapestStore, lang)}
                           </span>
                         </div>
 
@@ -522,7 +736,19 @@ export const AppModals: React.FC<ModalProps> = ({
                                     </span>
                                   )}
                                 </div>
-                                <div style={{ fontSize: 10.5, color: '#4B5563' }}>{primaryLeft.unitPriceLabel}</div>
+                                <div style={{ fontSize: 10.5, color: '#4B5563' }}>
+                                  {primaryLeft.unitPriceLabel}
+                                  {primaryLeft.isOutdated && (
+                                    <span style={{ color: '#B45309', fontWeight: 800, marginLeft: 4 }}>
+                                      • ⚠️ {pickLocalizedText(lang, { en: 'Outdated', pl: 'Nieaktualna', az: 'Köhnəlmiş' })}
+                                    </span>
+                                  )}
+                                  {primaryLeft.isAvailable === false && (
+                                    <span style={{ color: '#DC2626', fontWeight: 800, marginLeft: 4 }}>
+                                      • 🚫 {pickLocalizedText(lang, { en: 'Unavailable', pl: 'Niedostępny', az: 'Stokda yoxdur' })}
+                                    </span>
+                                  )}
+                                </div>
                                 {primaryLeft.loyaltyRequired && (
                                   <div style={{ fontSize: 10, color: '#B45309', fontWeight: 700, marginTop: 2 }}>
                                     💳{' '}
@@ -736,7 +962,7 @@ export const AppModals: React.FC<ModalProps> = ({
                             az: item.nameAz,
                           })}{' '}
                           <span style={{ color: '#2B8A44', fontWeight: 800 }}>
-                            ({item.quantity} {item.unit})
+                            ({localizeQuantityLabel(`${item.quantity} ${item.unit}`, lang)})
                           </span>
                         </div>
                         <div style={{ fontSize: 10.5, color: item.isExpiringSoon ? '#B45309' : '#647067' }}>
@@ -802,7 +1028,9 @@ export const AppModals: React.FC<ModalProps> = ({
                         <img
                           src={rec.imageUrl}
                           alt={rec.titleEn}
-                          style={{ width: 38, height: 38, borderRadius: 8, objectFit: 'cover' }}
+                          loading="lazy"
+                          decoding="async"
+                          style={{ width: 38, height: 38, borderRadius: 8, objectFit: 'cover', backgroundColor: '#EAECE8' }}
                         />
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 800 }}>
@@ -813,7 +1041,7 @@ export const AppModals: React.FC<ModalProps> = ({
                             })}
                           </div>
                           <div style={{ fontSize: 10.5, color: '#2B8A44' }}>
-                            {rec.totalTimeMin} min • ~{formatPln(recCost, activeCurrency)}
+                            {formatMinutes(rec.totalTimeMin, lang)} • ~{formatPln(recCost, activeCurrency)}
                           </div>
                         </div>
                       </div>
@@ -1500,7 +1728,10 @@ export const AppModals: React.FC<ModalProps> = ({
                         <img
                           src={r.imageUrl}
                           alt={r.titleEn}
-                          style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'cover' }}
+                          loading="lazy"
+                          decoding="async"
+                          onError={handleMealImageError}
+                          style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'cover', backgroundColor: '#EAECE8' }}
                         />
                         <div>
                           <div style={{ fontSize: 13, fontWeight: 800 }}>
@@ -1511,7 +1742,7 @@ export const AppModals: React.FC<ModalProps> = ({
                             })}
                           </div>
                           <div style={{ fontSize: 11, color: '#647067' }}>
-                            {r.totalTimeMin} min • {r.nutrition.caloriesKcal} kcal • ~{formatPln(rCost, activeCurrency)}
+                            {formatMinutes(r.totalTimeMin, lang)} • {r.nutrition.caloriesKcal} kcal • ~{formatPln(rCost, activeCurrency)}
                           </div>
                         </div>
                       </div>
@@ -1737,24 +1968,47 @@ export const AppModals: React.FC<ModalProps> = ({
               </button>
             </div>
             <div className="mp-modal-body">
-              <div className="mp-tabs-pill-bar" style={{ marginBottom: 14 }}>
+              <div
+                className="mp-tabs-pill-bar"
+                style={{ marginBottom: 14, gridTemplateColumns: 'repeat(4, 1fr)' }}
+              >
                 <button
                   className={`mp-tab-pill-btn ${authTab === 'login' ? 'active' : ''}`}
-                  onClick={() => setAuthTab('login')}
+                  onClick={() => {
+                    setErrorMsg(null);
+                    setAuthTab('login');
+                  }}
                 >
                   {t.login}
                 </button>
                 <button
                   className={`mp-tab-pill-btn ${authTab === 'register' ? 'active' : ''}`}
-                  onClick={() => setAuthTab('register')}
+                  onClick={() => {
+                    setErrorMsg(null);
+                    setAuthTab('register');
+                  }}
                 >
                   {t.register}
                 </button>
                 <button
                   className={`mp-tab-pill-btn ${authTab === 'recover' ? 'active' : ''}`}
-                  onClick={() => setAuthTab('recover')}
+                  onClick={() => {
+                    setErrorMsg(null);
+                    setAuthTab('recover');
+                  }}
                 >
                   {t.resetPassword}
+                </button>
+                <button
+                  className={`mp-tab-pill-btn ${authTab === 'delete' ? 'active' : ''}`}
+                  style={authTab === 'delete' ? { background: '#DC2626', color: '#FFFFFF' } : { color: '#DC2626' }}
+                  onClick={() => {
+                    setErrorMsg(null);
+                    setAuthTab('delete');
+                  }}
+                  data-testid="tab-delete-account"
+                >
+                  {t.deleteAccount}
                 </button>
               </div>
 
@@ -1896,11 +2150,20 @@ export const AppModals: React.FC<ModalProps> = ({
                   ) : (
                     <>
                       <div style={{ fontSize: 11.5, color: '#15803D', fontWeight: 700 }}>
-                        Demo Code: {recoveryCodeSent}
+                        {pickLocalizedText(lang, {
+                          en: 'Recovery Code:',
+                          pl: 'Kod odzyskiwania:',
+                          az: 'Bərpa kodu:',
+                        })}{' '}
+                        {recoveryCodeSent}
                       </div>
                       <input
                         className="mp-input"
-                        placeholder="Recovery Code"
+                        placeholder={pickLocalizedText(lang, {
+                          en: 'Recovery Code',
+                          pl: 'Kod odzyskiwania',
+                          az: 'Bərpa kodu',
+                        })}
                         value={recoveryCodeInput}
                         onChange={(e) => setRecoveryCodeInput(e.target.value)}
                       />
@@ -1933,6 +2196,128 @@ export const AppModals: React.FC<ModalProps> = ({
                   )}
                 </div>
               )}
+
+              {authTab === 'delete' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div
+                    style={{
+                      background: '#FEF2F2',
+                      border: '1px solid #FECACA',
+                      borderRadius: 12,
+                      padding: 12,
+                      fontSize: 11.5,
+                      color: '#7F1D1D',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, marginBottom: 4 }}>
+                      ⚠️{' '}
+                      {pickLocalizedText(lang, {
+                        en: 'Permanent Account & Associated Data Deletion',
+                        pl: 'Trwałe Usunięcie Konta i Wszystkich Danych',
+                        az: 'Hesabın və Əlaqəli Məlumatların Həmişəlik Silinməsi',
+                      })}
+                    </div>
+                    <div>
+                      {pickLocalizedText(lang, {
+                        en: `Deleting account "${state.user.email}" permanently and irreversibly purges your user profile, household settings, dietary & allergy preferences, saved meal plans, shopping lists, pantry inventory, and custom recipes.`,
+                        pl: `Usunięcie konta "${state.user.email}" trwale i nieodwracalnie usuwa profil użytkownika, ustawienia gospodarstwa domowego, preferencje dietetyczne i alergie, plany posiłków, listy zakupów, spiżarnię oraz własne przepisy.`,
+                        az: `"${state.user.email}" hesabının silinməsi istifadəçi profilinizi, ailə tənzimləmələrini, pəhriz və allergiya seçimlərini, yemək planlarını, alış-veriş siyahılarını, anbarı və fərdi reseptləri həmişəlik silir.`,
+                      })}
+                    </div>
+                  </div>
+
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 8,
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      color: '#1F2937',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={confirmPermanentDelete}
+                      onChange={(e) => setConfirmPermanentDelete(e.target.checked)}
+                      style={{ marginTop: 2 }}
+                      data-testid="checkbox-confirm-delete-account"
+                    />
+                    <span>
+                      {pickLocalizedText(lang, {
+                        en: 'I confirm that I want to permanently delete my account and all associated personal data.',
+                        pl: 'Potwierdzam, że chcę trwale usunąć moje konto oraz wszystkie powiązane dane osobowe.',
+                        az: 'Hesabımı və bütün əlaqəli şəxsi məlumatlarımı həmişəlik silmək istədiyimi təsdiqləyirəm.',
+                      })}
+                    </span>
+                  </label>
+
+                  <button
+                    className="mp-primary-cta-btn"
+                    style={{
+                      background: confirmPermanentDelete ? '#DC2626' : '#9CA3AF',
+                      cursor: confirmPermanentDelete ? 'pointer' : 'not-allowed',
+                    }}
+                    disabled={!confirmPermanentDelete || busy}
+                    data-testid="btn-confirm-delete-account"
+                    onClick={async () => {
+                      if (!confirmPermanentDelete) return;
+                      setBusy(true);
+                      setErrorMsg(null);
+                      try {
+                        await onDeleteAccount();
+                        setConfirmPermanentDelete(false);
+                        onClose();
+                      } catch (err: any) {
+                        setErrorMsg(err.message);
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    <Trash2 size={15} />{' '}
+                    {pickLocalizedText(lang, {
+                      en: 'Permanently Delete Account & Data',
+                      pl: 'Trwale Usuń Konto i Dane',
+                      az: 'Hesabı və Məlumatları Həmişəlik Sil',
+                    })}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="mp-outline-btn"
+                    onClick={async () => {
+                      await onExportUserData();
+                    }}
+                    data-testid="btn-export-user-data"
+                  >
+                    📥{' '}
+                    {pickLocalizedText(lang, {
+                      en: 'Export My Personal Data (GDPR JSON)',
+                      pl: 'Eksportuj Moje Dane Osobowe (RODO JSON)',
+                      az: 'Şəxsi Məlumatlarımı İxrac Et (GDPR JSON)',
+                    })}
+                  </button>
+
+                  <div style={{ fontSize: 10.5, color: '#647067', textAlign: 'center' }}>
+                    {pickLocalizedText(lang, {
+                      en: 'Web deletion portal (without app):',
+                      pl: 'Formularz usunięcia konta przez www:',
+                      az: 'Veb vasitəsilə hesab silmə portalı:',
+                    })}{' '}
+                    <a
+                      href="/delete-account"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#196431', fontWeight: 700 }}
+                    >
+                      /delete-account
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}
@@ -1956,9 +2341,9 @@ export const AppModals: React.FC<ModalProps> = ({
                   })}
                 </strong>{' '}
                 {pickLocalizedText(lang, {
-                  en: 'Every user account (region, currency, dietary preferences, allergies, meal plans, shopping lists, and pantry inventory) is strictly isolated in SQLite and protected via JWT authentication.',
-                  pl: 'Dane każdego użytkownika (region, waluta, preferencje żywieniowe, alergie, plany posiłków, lista zakupów oraz zawartość spiżarni) są ściśle izolowane w bazie SQLite oraz chronione tokenami JWT.',
-                  az: 'Hər bir istifadəçinin məlumatları (region, valyuta, pəhriz seçimləri, allergiyalar, yemək planları, alış-veriş siyahısı və anbar) SQLite bazasında tam izolyasiya olunur və JWT ilə qorunur.',
+                  en: 'Every user account (region, currency, dietary preferences, allergies, meal plans, shopping lists, and pantry inventory) is strictly isolated in SQLite and protected via JWT authentication. No personal data is sold or shared with third-party advertisers.',
+                  pl: 'Dane każdego użytkownika (region, waluta, preferencje żywieniowe, alergie, plany posiłków, lista zakupów oraz zawartość spiżarni) są ściśle izolowane w bazie SQLite oraz chronione tokenami JWT. Dane nie są sprzedawane ani udostępniane reklamodawcom.',
+                  az: 'Hər bir istifadəçinin məlumatları (region, valyuta, pəhriz seçimləri, allergiyalar, yemək planları, alış-veriş siyahısı və anbar) SQLite bazasında tam izolyasiya olunur və JWT ilə qorunur. Şəxsi məlumatlar üçüncü tərəflərə satılmır.',
                 })}
               </p>
               <p style={{ marginBottom: 10 }}>
@@ -1975,20 +2360,275 @@ export const AppModals: React.FC<ModalProps> = ({
                   az: 'Tətbiq Polşa (PLN ilə Biedronka, Lidl, Auchan, Kaufland) və Azərbaycan (AZN ilə Bravo, Araz, Bazarstore, Rahat) üçün ayrıca yerli kataloqlardan və sadiqlik kartı şərtlərindən istifadə edir.',
                 })}
               </p>
-              <p>
+              <p style={{ marginBottom: 10 }}>
                 <strong>
                   {pickLocalizedText(lang, {
-                    en: '3. Deterministic Allergy Safety:',
-                    pl: '3. Deterministyczne Bezpieczeństwo Alergii:',
-                    az: '3. Deterministik Allergiya Təhlükəsizliyi:',
+                    en: '3. Deterministic Allergy Safety & Nutritional Disclaimer:',
+                    pl: '3. Bezpieczeństwo Alergii i Zastrzeżenie Medyczne:',
+                    az: '3. Allergiya Təhlükəsizliyi və Tibbi Xəbərdarlıq:',
                   })}
                 </strong>{' '}
                 {pickLocalizedText(lang, {
-                  en: 'All AI-generated meal plans undergo mandatory server-side validation against declared allergies and excluded ingredients.',
-                  pl: 'Wszystkie plany posiłków przechodzą obowiązkową walidację po stronie serwera pod kątem alergii i wykluczonych składników.',
-                  az: 'Bütün süni intellekt yemək planları bəyan edilmiş allergiya və istisna olunan ərzaqlara qarşı server tərəfindən məcburi yoxlanılır.',
+                  en: 'All AI-generated meal plans undergo mandatory server-side validation against declared allergies and excluded ingredients. Nutritional figures and recipes are for informational meal planning only and do not constitute medical or clinical advice. Always verify physical product labels for allergens.',
+                  pl: 'Wszystkie plany posiłków przechodzą obowiązkową walidację po stronie serwera pod kątem alergii i wykluczonych składników. Wartości odżywcze mają charakter informacyjny i nie stanowią porady lekarskiej. Zawsze sprawdzaj fizyczne etykiety produktów.',
+                  az: 'Bütün süni intellekt yemək planları bəyan edilmiş allergiya və istisna olunan ərzaqlara qarşı server tərəfindən məcburi yoxlanılır. Qida dəyərləri yalnız məlumat məqsədlidir və tibbi məsləhət deyil. Həmişə fiziki məhsul etiketlərini yoxlayın.',
                 })}
               </p>
+              <p style={{ marginBottom: 12 }}>
+                <strong>
+                  {pickLocalizedText(lang, {
+                    en: '4. Account Deletion & Data Retention (Google Play Policy):',
+                    pl: '4. Usuwanie Konta i Retencja Danych (Polityka Google Play):',
+                    az: '4. Hesabın Silinməsi və Məlumatların Saxlanması (Google Play Siyasəti):',
+                  })}
+                </strong>{' '}
+                {pickLocalizedText(lang, {
+                  en: 'You can permanently delete your account and all associated data at any time inside the app (Profile → Account & Security → Delete Account) or on the web at /delete-account without reinstalling the app.',
+                  pl: 'Możesz w każdej chwili trwale usunąć konto i wszystkie dane w aplikacji (Profil → Konto i Bezpieczeństwo → Usuń konto) lub przez stronę /delete-account bez instalowania aplikacji.',
+                  az: 'Hesabınızı və bütün məlumatlarınızı istənilən vaxt tətbiq daxilində (Profil → Hesabı sil) və ya /delete-account veb səhifəsindən həmişəlik silə bilərsiniz.',
+                })}
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="mp-outline-btn"
+                  style={{ flex: 1 }}
+                  onClick={async () => {
+                    await onExportUserData();
+                  }}
+                >
+                  📥{' '}
+                  {pickLocalizedText(lang, {
+                    en: 'Export Data (GDPR)',
+                    pl: 'Eksportuj dane (RODO)',
+                    az: 'Məlumatları ixrac et',
+                  })}
+                </button>
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mp-outline-btn"
+                  style={{ flex: 1, textDecoration: 'none' }}
+                >
+                  🌐{' '}
+                  {pickLocalizedText(lang, {
+                    en: 'Public Privacy Page',
+                    pl: 'Strona Prywatności',
+                    az: 'Məxfilik Səhifəsi',
+                  })}
+                </a>
+                <a
+                  href="/delete-account"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mp-outline-btn"
+                  style={{ flex: 1, textDecoration: 'none', color: '#DC2626', borderColor: '#FECACA' }}
+                >
+                  🗑️{' '}
+                  {pickLocalizedText(lang, {
+                    en: 'Web Deletion Portal',
+                    pl: 'Usuwanie przez WWW',
+                    az: 'Veb Hesab Silmə',
+                  })}
+                </a>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* === 9. AI CONTENT REPORTING / FLAGGING MODAL (Google Play AI-Generated Content Policy) === */}
+        {activeModal === 'ai_report' && (
+          <>
+            <div className="mp-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertTriangle size={19} color="#D97706" />
+                <h3 style={{ fontSize: 16, fontWeight: 800 }}>
+                  {pickLocalizedText(lang, {
+                    en: 'Report AI-Generated Content',
+                    pl: 'Zgłoś Treść Wygenerowaną przez AI',
+                    az: 'Süni İntellekt Məzmununu Şikayət Et',
+                  })}
+                </h3>
+              </div>
+              <button className="mp-icon-btn" onClick={onClose}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mp-modal-body">
+              <div
+                style={{
+                  background: '#FFFBEB',
+                  border: '1px solid #FDE68A',
+                  borderRadius: 10,
+                  padding: '8px 10px',
+                  fontSize: 11.5,
+                  color: '#92400E',
+                  marginBottom: 12,
+                }}
+              >
+                {pickLocalizedText(lang, {
+                  en: 'Found an inaccurate allergen tag, unsuitable AI meal suggestion, or incorrect nutritional/price estimate? Flag it below for immediate review.',
+                  pl: 'Zauważyłeś nieprawidłowy alergen, nieodpowiednią propozycję posiłku AI lub błąd w wartościach odżywczych? Zgłoś to poniżej.',
+                  az: 'Yanlış allergen qeydi, uyğunsuz AI yemək təklifi və ya qida dəyəri xətası gördünüz? Aşağıda bizə bildirin.',
+                })}
+              </div>
+
+              {errorMsg && (
+                <div style={{ background: '#FEE2E2', color: '#991B1B', padding: 10, borderRadius: 10, marginBottom: 10, fontSize: 12 }}>
+                  {errorMsg}
+                </div>
+              )}
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11.5, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                  {pickLocalizedText(lang, {
+                    en: 'What are you reporting?',
+                    pl: 'Czego dotyczy zgłoszenie?',
+                    az: 'Nə barədə məlumat verirsiniz?',
+                  })}
+                </label>
+                <select
+                  className="mp-input"
+                  value={reportTargetType}
+                  onChange={(e) => setReportTargetType(e.target.value as any)}
+                >
+                  <option value="meal_plan">
+                    {pickLocalizedText(lang, {
+                      en: 'AI Weekly Meal Plan',
+                      pl: 'Tygodniowy Plan Posiłków AI',
+                      az: 'Həftəlik AI Yemək Planı',
+                    })}
+                  </option>
+                  <option value="recipe">
+                    {pickLocalizedText(lang, {
+                      en: 'Recipe Instructions / Ingredients',
+                      pl: 'Przepis / Składniki',
+                      az: 'Resept / Ərzaqlar',
+                    })}
+                  </option>
+                  <option value="ingredient_match">
+                    {pickLocalizedText(lang, {
+                      en: 'Supermarket Product Match / Price',
+                      pl: 'Dopasowanie Produktu / Cena w sklepie',
+                      az: 'Market Məhsul Uyğunluğu / Qiymət',
+                    })}
+                  </option>
+                  <option value="other">
+                    {pickLocalizedText(lang, { en: 'Other', pl: 'Inne', az: 'Digər' })}
+                  </option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11.5, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                  {pickLocalizedText(lang, {
+                    en: 'Issue Category',
+                    pl: 'Kategoria problemu',
+                    az: 'Problem kateqoriyası',
+                  })}
+                </label>
+                <select
+                  className="mp-input"
+                  value={reportReason}
+                  onChange={(e) => setReportReason(e.target.value as any)}
+                >
+                  <option value="allergen_safety">
+                    {pickLocalizedText(lang, {
+                      en: 'Allergen or dietary restriction concern',
+                      pl: 'Problem z alergenem lub dietą',
+                      az: 'Allergen və ya pəhriz uyğunsuzluğu',
+                    })}
+                  </option>
+                  <option value="inaccurate_nutrition">
+                    {pickLocalizedText(lang, {
+                      en: 'Inaccurate nutrition or cooking steps',
+                      pl: 'Nieścisłe wartości odżywcze lub kroki',
+                      az: 'Qeyri-dəqiq qida dəyəri və ya bişirmə qaydası',
+                    })}
+                  </option>
+                  <option value="wrong_price_or_product">
+                    {pickLocalizedText(lang, {
+                      en: 'Incorrect package size or store price',
+                      pl: 'Błędna gramatura lub cena produktu',
+                      az: 'Yanlış qablaşdırma ölçüsü və ya qiymət',
+                    })}
+                  </option>
+                  <option value="inappropriate_content">
+                    {pickLocalizedText(lang, {
+                      en: 'Inappropriate or offensive AI content',
+                      pl: 'Nieodpowiednia treść AI',
+                      az: 'Uyğunsuz süni intellekt məzmunu',
+                    })}
+                  </option>
+                  <option value="other">
+                    {pickLocalizedText(lang, { en: 'Other feedback', pl: 'Inna uwaga', az: 'Digər rəy' })}
+                  </option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11.5, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                  {pickLocalizedText(lang, {
+                    en: 'Details',
+                    pl: 'Opis zgłoszenia',
+                    az: 'Ətraflı məlumat',
+                  })}
+                </label>
+                <textarea
+                  className="mp-input"
+                  rows={3}
+                  placeholder={pickLocalizedText(lang, {
+                    en: 'Describe the issue so we can improve safety and accuracy...',
+                    pl: 'Opisz problem, abyśmy mogli poprawić bezpieczeństwo...',
+                    az: 'Təhlükəsizlik və dəqiqliyi artırmaq üçün problemi təsvir edin...',
+                  })}
+                  value={reportDetails}
+                  onChange={(e) => setReportDetails(e.target.value)}
+                  data-testid="input-ai-report-details"
+                />
+              </div>
+
+              <button
+                className="mp-primary-cta-btn"
+                disabled={busy}
+                data-testid="btn-submit-ai-report"
+                onClick={async () => {
+                  if (!reportDetails.trim()) {
+                    setErrorMsg(
+                      pickLocalizedText(lang, {
+                        en: 'Please provide brief details about the issue.',
+                        pl: 'Podaj krótki opis zgłoszenia.',
+                        az: 'Zəhmət olmasa problem haqqında qısa məlumat yazın.',
+                      })
+                    );
+                    return;
+                  }
+                  setBusy(true);
+                  setErrorMsg(null);
+                  try {
+                    await onReportAiContent({
+                      targetType: reportTargetType,
+                      targetId: state.weeklyPlan.id,
+                      reasonCategory: reportReason,
+                      details: reportDetails.trim(),
+                    });
+                    setReportDetails('');
+                    onClose();
+                  } catch (err: any) {
+                    setErrorMsg(err.message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <Check size={16} />{' '}
+                {pickLocalizedText(lang, {
+                  en: 'Submit Content Report',
+                  pl: 'Wyślij Zgłoszenie',
+                  az: 'Şikayəti Göndər',
+                })}
+              </button>
             </div>
           </>
         )}

@@ -77,9 +77,11 @@ export type ShoppingCategory =
   | 'Other';
 
 export type PriceVerificationStatus =
+  | 'LIVE_MONITORED_CATALOGUE'
   | 'VERIFIED_LEAFLET_PROMO'
   | 'DEMONSTRATION_CATALOGUE'
   | 'ESTIMATED_MARKET_AVG'
+  | 'OUTDATED_PRICE'
   | 'UNAVAILABLE';
 
 export type StoreChannel = 'PHYSICAL_STORE' | 'ONLINE_AND_STORE' | 'ONLINE_ONLY';
@@ -175,6 +177,9 @@ export interface ProductPriceRecord {
   sourceUrl: string;
   verificationStatus: PriceVerificationStatus;
   lastUpdatedAt: string;
+  isAvailable?: boolean;
+  isOutdated?: boolean;
+  priceAgeHours?: number;
 }
 
 export interface SupermarketProduct {
@@ -334,6 +339,9 @@ export interface ShoppingItem {
   promoValidUntil: string | null;
   storeChannel: StoreChannel;
   lastUpdatedAt: string;
+  isAvailable?: boolean;
+  isOutdated?: boolean;
+  priceAgeHours?: number;
   matchConfidence: MatchConfidence;
   isPurchased: boolean;
   isManual: boolean;
@@ -425,4 +433,91 @@ export interface BudgetAnalysis {
   disclaimerPl: string;
   disclaimerEn: string;
   disclaimerAz?: string;
+}
+
+export interface MonitoredProductRecord {
+  id: string;
+  supermarketId: SupermarketSlug;
+  regionCode: RegionCode;
+  currencyCode: CurrencyCode;
+  externalId: string | null;
+  variantKey: string;
+  ean: string | null;
+  canonicalIngredient: string | null;
+  nameAz: string;
+  nameEn: string;
+  namePl: string;
+  brand: string;
+  category: ShoppingCategory;
+  packageSize: number;
+  packageUnit: 'g' | 'ml' | 'pcs';
+  packageLabelAz: string;
+  imageUrl: string;
+  productUrl: string;
+  regularPrice: number;
+  discountedPrice: number | null;
+  effectivePrice: number;
+  unitPrice: number;
+  unitPriceLabel: string;
+  isAvailable: boolean;
+  verificationStatus: PriceVerificationStatus;
+  matchConfidence: MatchConfidence;
+  lastCheckedAt: string;
+  lastPriceChangedAt: string;
+  priceAgeHours: number;
+  isOutdated: boolean;
+}
+
+export interface PriceHistoryEntry {
+  id: string;
+  monitoredProductId: string;
+  supermarketId: SupermarketSlug;
+  canonicalIngredient: string | null;
+  productNameAz?: string;
+  productNameEn?: string;
+  packageLabelAz?: string;
+  regularPrice: number;
+  discountedPrice: number | null;
+  effectivePrice: number;
+  previousEffectivePrice: number | null;
+  priceDelta: number | null;
+  isAvailable: boolean;
+  recordedAt: string;
+  syncRunId: string | null;
+}
+
+export interface PriceSyncRunRecord {
+  id: string;
+  supermarketId: SupermarketSlug;
+  sourceUrl: string;
+  triggerType: 'SCHEDULED_24H' | 'STARTUP_CHECK' | 'MANUAL_API' | 'SEED_BASELINE';
+  status: 'SUCCESS' | 'PARTIAL_FALLBACK' | 'FAILED';
+  productsChecked: number;
+  productsUpdated: number;
+  priceChangesRecorded: number;
+  errorsCount: number;
+  errorSummary: string | null;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+}
+
+export interface PriceMonitoringSummary {
+  supermarketId: SupermarketSlug;
+  supermarketName: string;
+  primaryUrl: string;
+  alternativeUrl: string;
+  scheduleIntervalHours: number;
+  outdatedThresholdHours: number;
+  lastSuccessfulSyncAt: string | null;
+  lastAttemptedSyncAt: string | null;
+  lastSyncStatus: 'SUCCESS' | 'PARTIAL_FALLBACK' | 'FAILED' | 'NEVER_RUN';
+  nextScheduledSyncAt: string;
+  isStale: boolean;
+  totalMonitoredProducts: number;
+  availableProductsCount: number;
+  unavailableProductsCount: number;
+  outdatedProductsCount: number;
+  recentPriceChanges: PriceHistoryEntry[];
+  recentSyncRuns: PriceSyncRunRecord[];
 }

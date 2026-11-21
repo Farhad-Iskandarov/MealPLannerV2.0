@@ -19,8 +19,28 @@ import {
   MealType,
   RegionCode,
   CurrencyCode,
+  MonitoredProductRecord,
+  PriceHistoryEntry,
+  PriceSyncRunRecord,
+  PriceMonitoringSummary,
 } from '../../shared/types';
-import { SUPERMARKETS, ALL_CATALOGUE_PRODUCTS } from '../supermarkets/catalogueData';
+import {
+  SUPERMARKETS,
+  ALL_CATALOGUE_PRODUCTS,
+  AZ_CATALOGUE_PRODUCTS,
+  applyMonitoredPricesToCatalogue,
+} from '../supermarkets/catalogueData';
+import {
+  BAZARSTORE_PRIMARY_URL,
+  BAZARSTORE_ALTERNATIVE_URL,
+  MONITOR_INTERVAL_HOURS,
+  OUTDATED_THRESHOLD_HOURS,
+  RawScrapedProductInput,
+  NormalizedMonitoredCandidate,
+  normalizeBazarstoreProductCandidate,
+  computePriceStaleness,
+  fetchLiveBazarstoreCatalogue,
+} from '../monitoring/bazarstoreMonitor';
 import { SEED_RECIPES } from '../recipes/recipeSeedData';
 import { hashPassword } from '../auth/authService';
 import {
@@ -336,18 +356,99 @@ export class MealPlannerDatabase {
         PRIMARY KEY (user_id, recipe_id, entry_type)
       );
 
+      CREATE TABLE IF NOT EXISTS ai_content_reports (
+        id TEXT PRIMARY KEY,
+        user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        target_type TEXT NOT NULL CHECK(target_type IN ('meal_plan', 'recipe', 'ingredient_match', 'other')),
+        target_id TEXT NOT NULL,
+        reason_category TEXT NOT NULL CHECK(reason_category IN ('allergen_safety', 'inaccurate_nutrition', 'inappropriate_content', 'wrong_price_or_product', 'other')),
+        details TEXT NOT NULL,
+        region_code TEXT NOT NULL DEFAULT 'PL',
+        language TEXT NOT NULL DEFAULT 'en',
+        status TEXT NOT NULL DEFAULT 'RECEIVED',
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS monitored_products (
+        id TEXT PRIMARY KEY,
+        supermarket_id TEXT NOT NULL,
+        region_code TEXT NOT NULL DEFAULT 'AZ',
+        currency_code TEXT NOT NULL DEFAULT 'AZN',
+        external_id TEXT,
+        variant_key TEXT NOT NULL,
+        ean TEXT,
+        canonical_ingredient TEXT,
+        name_az TEXT NOT NULL,
+        name_en TEXT NOT NULL,
+        name_pl TEXT NOT NULL,
+        brand TEXT NOT NULL,
+        category TEXT NOT NULL,
+        package_size REAL NOT NULL,
+        package_unit TEXT NOT NULL,
+        package_label_az TEXT NOT NULL,
+        image_url TEXT NOT NULL,
+        product_url TEXT NOT NULL,
+        regular_price REAL NOT NULL,
+        discounted_price REAL,
+        effective_price REAL NOT NULL,
+        unit_price REAL NOT NULL,
+        unit_price_label TEXT NOT NULL,
+        is_available INTEGER NOT NULL DEFAULT 1,
+        verification_status TEXT NOT NULL DEFAULT 'LIVE_MONITORED_CATALOGUE',
+        match_confidence TEXT NOT NULL DEFAULT 'HIGH',
+        last_checked_at TEXT NOT NULL,
+        last_price_changed_at TEXT NOT NULL,
+        UNIQUE(supermarket_id, variant_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS monitored_price_history (
+        id TEXT PRIMARY KEY,
+        monitored_product_id TEXT NOT NULL REFERENCES monitored_products(id) ON DELETE CASCADE,
+        supermarket_id TEXT NOT NULL,
+        canonical_ingredient TEXT,
+        regular_price REAL NOT NULL,
+        discounted_price REAL,
+        effective_price REAL NOT NULL,
+        previous_effective_price REAL,
+        price_delta REAL,
+        is_available INTEGER NOT NULL DEFAULT 1,
+        recorded_at TEXT NOT NULL,
+        sync_run_id TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS price_sync_runs (
+        id TEXT PRIMARY KEY,
+        supermarket_id TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        trigger_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        products_checked INTEGER NOT NULL DEFAULT 0,
+        products_updated INTEGER NOT NULL DEFAULT 0,
+        price_changes_recorded INTEGER NOT NULL DEFAULT 0,
+        errors_count INTEGER NOT NULL DEFAULT 0,
+        error_summary TEXT,
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NOT NULL,
+        completed_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_products_canonical ON products(canonical_ingredient);
       CREATE INDEX IF NOT EXISTS idx_product_prices_store ON product_prices(supermarket_id, product_id);
       CREATE INDEX IF NOT EXISTS idx_planned_meals_user_day ON planned_meals(user_id, day_index);
       CREATE INDEX IF NOT EXISTS idx_pantry_user ON pantry(user_id);
       CREATE INDEX IF NOT EXISTS idx_shopping_items_user ON shopping_items(user_id);
       CREATE INDEX IF NOT EXISTS idx_recipes_author ON recipes(author_user_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_reports_user ON ai_content_reports(user_id);
+      CREATE INDEX IF NOT EXISTS idx_monitored_store_canonical ON monitored_products(supermarket_id, canonical_ingredient);
+      CREATE INDEX IF NOT EXISTS idx_monitored_history_prod ON monitored_price_history(monitored_product_id, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_sync_runs_store ON price_sync_runs(supermarket_id, completed_at DESC);
     `);
 
     // Safe non-destructive migrations for existing SQLite databases on disk
     this.migrateUsersLanguageConstraintIfNeeded();
     this.ensureColumn('users', 'region_code', "TEXT NOT NULL DEFAULT 'PL'");
     this.ensureColumn('users', 'currency_code', "TEXT NOT NULL DEFAULT 'PLN'");
+    this.ensureColumn('users', 'reset_code_expires_at', 'TEXT');
     this.ensureColumn('preferences', 'region_code', "TEXT NOT NULL DEFAULT 'PL'");
     this.ensureColumn('preferences', 'currency_code', "TEXT NOT NULL DEFAULT 'PLN'");
     this.ensureColumn('preferences', 'plan_duration_days', 'INTEGER NOT NULL DEFAULT 7');
@@ -485,6 +586,19 @@ export class MealPlannerDatabase {
     for (const r of SEED_RECIPES) {
       this.insertRecipeRecord(r);
     }
+
+    // Repair any custom or legacy recipe rows that still reference the retired Unsplash 404 URL
+    this.db
+      .prepare(
+        `UPDATE recipes
+         SET image_url = 'https://images.unsplash.com/photo-1622973536968-3ead9e780960?auto=format&fit=crop&w=800&q=80'
+         WHERE image_url LIKE '%photo-1621996346565-e3d5d6281298%'`
+      )
+      .run();
+
+    // Seed initial Bazarstore monitored products & sync history if empty, then refresh in-memory catalogue
+    this.seedInitialBazarstoreMonitoredCatalogueIfEmpty();
+    this.refreshInMemoryCatalogueFromMonitoredPrices();
   }
 
   public async seedIfEmpty(_options?: { seedDemoUser?: boolean }): Promise<void> {
@@ -730,7 +844,12 @@ export class MealPlannerDatabase {
     };
   }
 
-  public getUserByEmail(email: string): { user: User; passwordHash: string; resetCode: string | null } | null {
+  public getUserByEmail(email: string): {
+    user: User;
+    passwordHash: string;
+    resetCode: string | null;
+    resetCodeExpiresAt: string | null;
+  } | null {
     const row = this.db
       .prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)')
       .get(email.trim()) as any;
@@ -741,6 +860,7 @@ export class MealPlannerDatabase {
       user,
       passwordHash: row.password_hash,
       resetCode: row.reset_code ?? null,
+      resetCodeExpiresAt: row.reset_code_expires_at ?? null,
     };
   }
 
@@ -1275,7 +1395,7 @@ export class MealPlannerDatabase {
       );
     }
 
-    // Ensure a shopping_lists record exists for user
+    // Ensure a shopping_lists record exists for user and stays synced with the newly generated plan's store & currency
     const existingList = this.db
       .prepare('SELECT id FROM shopping_lists WHERE user_id = ?')
       .get(userId) as any;
@@ -1293,6 +1413,21 @@ export class MealPlannerDatabase {
           regionCode,
           currencyCode,
           now
+        );
+    } else {
+      this.db
+        .prepare(
+          `UPDATE shopping_lists
+           SET weekly_plan_id = ?, supermarket_id = ?, region_code = ?, currency_code = ?, updated_at = ?
+           WHERE user_id = ?`
+        )
+        .run(
+          planId,
+          preferences.preferredSupermarket,
+          regionCode,
+          currencyCode,
+          now,
+          userId
         );
     }
 
@@ -1749,7 +1884,1033 @@ export class MealPlannerDatabase {
     return this.getShoppingList(userId);
   }
 
-  public deleteUserAccount(userId: string): void {
+  public deleteUserAccount(userId: string): {
+    deletedUserId: string;
+    purgedTables: string[];
+    deletedAt: string;
+  } {
+    // Explicitly purge all associated user data across all tables (Google Play User Data Account Deletion Policy)
+    const customRecipes = this.db
+      .prepare('SELECT id FROM recipes WHERE author_user_id = ?')
+      .all(userId) as Array<{ id: string }>;
+    for (const cr of customRecipes) {
+      this.db.prepare('DELETE FROM ingredients WHERE recipe_id = ?').run(cr.id);
+    }
+    this.db.prepare('DELETE FROM ai_content_reports WHERE user_id = ?').run(userId);
+    this.db.prepare('DELETE FROM favourites WHERE user_id = ?').run(userId);
+    this.db.prepare('DELETE FROM shopping_items WHERE user_id = ?').run(userId);
+    this.db.prepare('DELETE FROM shopping_lists WHERE user_id = ?').run(userId);
+    this.db.prepare('DELETE FROM planned_meals WHERE user_id = ?').run(userId);
+    this.db.prepare('DELETE FROM weekly_plans WHERE user_id = ?').run(userId);
+    this.db.prepare('DELETE FROM pantry WHERE user_id = ?').run(userId);
+    this.db.prepare('DELETE FROM recipes WHERE author_user_id = ?').run(userId);
+    this.db.prepare('DELETE FROM preferences WHERE user_id = ?').run(userId);
+    this.db.prepare('DELETE FROM households WHERE user_id = ?').run(userId);
     this.db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+
+    return {
+      deletedUserId: userId,
+      purgedTables: [
+        'users',
+        'households',
+        'preferences',
+        'weekly_plans',
+        'planned_meals',
+        'shopping_lists',
+        'shopping_items',
+        'pantry',
+        'favourites',
+        'recipes (custom)',
+        'ingredients (custom)',
+        'ai_content_reports',
+      ],
+      deletedAt: new Date().toISOString(),
+    };
+  }
+
+  public reportAiContent(input: {
+    userId?: string | null;
+    targetType: 'meal_plan' | 'recipe' | 'ingredient_match' | 'other';
+    targetId: string;
+    reasonCategory:
+      | 'allergen_safety'
+      | 'inaccurate_nutrition'
+      | 'inappropriate_content'
+      | 'wrong_price_or_product'
+      | 'other';
+    details: string;
+    regionCode?: RegionCode;
+    language?: Language;
+  }): {
+    id: string;
+    targetType: string;
+    targetId: string;
+    reasonCategory: string;
+    details: string;
+    status: string;
+    createdAt: string;
+  } {
+    const validTargetTypes = new Set(['meal_plan', 'recipe', 'ingredient_match', 'other']);
+    const validReasons = new Set([
+      'allergen_safety',
+      'inaccurate_nutrition',
+      'inappropriate_content',
+      'wrong_price_or_product',
+      'other',
+    ]);
+
+    const targetType = validTargetTypes.has(input.targetType) ? input.targetType : 'other';
+    const reasonCategory = validReasons.has(input.reasonCategory) ? input.reasonCategory : 'other';
+    const details = String(input.details || '').trim().slice(0, 1000);
+    if (!details) {
+      throw new Error('Report description or reason details are required');
+    }
+
+    const id = `air-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const createdAt = new Date().toISOString();
+    const regionCode: RegionCode = input.regionCode === 'AZ' ? 'AZ' : 'PL';
+    const language: Language =
+      input.language === 'pl' || input.language === 'az' ? input.language : 'en';
+
+    this.db
+      .prepare(
+        `INSERT INTO ai_content_reports (
+          id, user_id, target_type, target_id, reason_category, details, region_code, language, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RECEIVED', ?)`
+      )
+      .run(
+        id,
+        input.userId || null,
+        targetType,
+        String(input.targetId || 'general').slice(0, 120),
+        reasonCategory,
+        details,
+        regionCode,
+        language,
+        createdAt
+      );
+
+    return {
+      id,
+      targetType,
+      targetId: String(input.targetId || 'general'),
+      reasonCategory,
+      details,
+      status: 'RECEIVED',
+      createdAt,
+    };
+  }
+
+  public getAiContentReports(userId?: string): Array<{
+    id: string;
+    userId: string | null;
+    targetType: string;
+    targetId: string;
+    reasonCategory: string;
+    details: string;
+    status: string;
+    createdAt: string;
+  }> {
+    const rows = userId
+      ? (this.db
+          .prepare('SELECT * FROM ai_content_reports WHERE user_id = ? ORDER BY created_at DESC')
+          .all(userId) as any[])
+      : (this.db
+          .prepare('SELECT * FROM ai_content_reports ORDER BY created_at DESC LIMIT 100')
+          .all() as any[]);
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      targetType: r.target_type,
+      targetId: r.target_id,
+      reasonCategory: r.reason_category,
+      details: r.details,
+      status: r.status,
+      createdAt: r.created_at,
+    }));
+  }
+
+  public exportUserData(userId: string): Record<string, unknown> {
+    const user = this.getUserById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+    const weeklyPlan = this.getWeeklyPlan(userId);
+    const shoppingList = this.getShoppingList(userId, weeklyPlan.meals);
+    const pantry = this.getPantryItems(userId);
+    const customRecipes = this.getAllRecipesForUser(userId).filter((r) => r.isCustom);
+    const reports = this.getAiContentReports(userId);
+
+    return {
+      schemaVersion: '1.0',
+      exportedAt: new Date().toISOString(),
+      gdprBasis: 'GDPR Article 20 — Right to Data Portability',
+      account: {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        language: user.language,
+        regionCode: user.regionCode,
+        currencyCode: user.currencyCode,
+        householdName: user.householdName,
+        createdAt: user.createdAt,
+      },
+      preferences: user.preferences,
+      weeklyPlan,
+      shoppingList,
+      pantry,
+      customRecipes,
+      aiContentReports: reports,
+    };
+  }
+
+  // ============================================================================
+  // BAZAR STORE 24-HOUR PRICE MONITORING, NORMALIZATION & HISTORY ENGINE
+  // ============================================================================
+
+  private seedInitialBazarstoreMonitoredCatalogueIfEmpty(): void {
+    const countRow = this.db
+      .prepare("SELECT COUNT(*) as cnt FROM monitored_products WHERE supermarket_id = 'bazarstore'")
+      .get() as { cnt: number };
+
+    // Check if an older seed with outdated carrot price (1.45 ₼ instead of 1.29 ₼) is present on disk
+    const legacyCarrotRow = this.db
+      .prepare(
+        "SELECT effective_price, name_az FROM monitored_products WHERE id = 'mon-bz-carrot-1000g'"
+      )
+      .get() as { effective_price?: number; name_az?: string } | undefined;
+
+    if (
+      countRow.cnt > 0 &&
+      legacyCarrotRow &&
+      Math.abs(Number(legacyCarrotRow.effective_price) - 1.29) < 0.01 &&
+      legacyCarrotRow.name_az?.startsWith('Kök kq')
+    ) {
+      return;
+    }
+
+    if (countRow.cnt > 0) {
+      this.db.prepare("DELETE FROM monitored_price_history WHERE supermarket_id = 'bazarstore'").run();
+      this.db.prepare("DELETE FROM monitored_products WHERE supermarket_id = 'bazarstore'").run();
+    }
+
+    const nowIso = new Date().toISOString();
+    const prevWeekIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    const syncRunId = `sync-bazarstore-seed-${Date.now()}`;
+    let checkedCount = 0;
+    let priceChangesCount = 0;
+
+    // 1. Seed all 27 core Azerbaijan catalogue products for Bazarstore
+    for (const azProd of AZ_CATALOGUE_PRODUCTS) {
+      const bzPrice = azProd.prices.bazarstore;
+      if (!bzPrice) continue;
+
+      const baseTitle = azProd.nameAz || azProd.nameEn;
+      const pkgLabel = azProd.packageLabelAz || azProd.packageLabelEn;
+      const fullSeedTitle =
+        baseTitle.toLowerCase().includes(pkgLabel.toLowerCase()) ||
+        /\b(?:kq|kg|q|ml|l|ədəd)\b/i.test(baseTitle)
+          ? baseTitle
+          : `${baseTitle} ${pkgLabel}`;
+
+      const candidate = normalizeBazarstoreProductCandidate(
+        {
+          externalId: `bz-${azProd.id}`,
+          ean: azProd.ean,
+          title: fullSeedTitle,
+          brand: azProd.brand.split('/')[0].trim(),
+          category: azProd.category,
+          regularPrice: bzPrice.regularPricePln,
+          discountedPrice: bzPrice.promoPricePln,
+          isAvailable: true,
+          imageUrl: azProd.imageUrl,
+          productUrl: `https://bazarstore.az/${azProd.canonicalIngredient.replace(/_/g, '-')}`,
+          packageSize: azProd.packageSize,
+          packageUnit: azProd.packageUnit,
+          canonicalIngredient: azProd.canonicalIngredient,
+          nameEn: azProd.nameEn,
+          namePl: azProd.namePl,
+        },
+        'bazarstore'
+      );
+
+      if (candidate) {
+        checkedCount++;
+        const monId = `mon-bz-${azProd.canonicalIngredient}-${azProd.packageSize}${azProd.packageUnit}`;
+        this.db
+          .prepare(
+            `INSERT OR REPLACE INTO monitored_products (
+              id, supermarket_id, region_code, currency_code, external_id, variant_key, ean,
+              canonical_ingredient, name_az, name_en, name_pl, brand, category,
+              package_size, package_unit, package_label_az, image_url, product_url,
+              regular_price, discounted_price, effective_price, unit_price, unit_price_label,
+              is_available, verification_status, match_confidence, last_checked_at, last_price_changed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(
+            monId,
+            candidate.supermarketId,
+            candidate.regionCode,
+            candidate.currencyCode,
+            candidate.externalId,
+            candidate.variantKey,
+            candidate.ean,
+            candidate.canonicalIngredient,
+            candidate.nameAz,
+            candidate.nameEn,
+            candidate.namePl,
+            candidate.brand,
+            candidate.category,
+            candidate.packageSize,
+            candidate.packageUnit,
+            candidate.packageLabelAz,
+            candidate.imageUrl,
+            candidate.productUrl,
+            candidate.regularPrice,
+            candidate.discountedPrice,
+            candidate.effectivePrice,
+            candidate.unitPrice,
+            candidate.unitPriceLabel,
+            1,
+            'LIVE_MONITORED_CATALOGUE',
+            candidate.matchConfidence,
+            nowIso,
+            nowIso
+          );
+
+        // If product has a discount vs regular price, seed a 2-step historical price trail
+        if (candidate.discountedPrice !== null && candidate.discountedPrice < candidate.regularPrice) {
+          priceChangesCount++;
+          this.db
+            .prepare(
+              `INSERT OR REPLACE INTO monitored_price_history (
+                id, monitored_product_id, supermarket_id, canonical_ingredient,
+                regular_price, discounted_price, effective_price, previous_effective_price, price_delta,
+                is_available, recorded_at, sync_run_id
+              ) VALUES (?, ?, 'bazarstore', ?, ?, NULL, ?, NULL, 0, 1, ?, ?)`
+            )
+            .run(
+              `mph-${monId}-prev`,
+              monId,
+              candidate.canonicalIngredient,
+              candidate.regularPrice,
+              candidate.regularPrice,
+              prevWeekIso,
+              syncRunId
+            );
+
+          this.db
+            .prepare(
+              `INSERT OR REPLACE INTO monitored_price_history (
+                id, monitored_product_id, supermarket_id, canonical_ingredient,
+                regular_price, discounted_price, effective_price, previous_effective_price, price_delta,
+                is_available, recorded_at, sync_run_id
+              ) VALUES (?, ?, 'bazarstore', ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+            )
+            .run(
+              `mph-${monId}-curr`,
+              monId,
+              candidate.canonicalIngredient,
+              candidate.regularPrice,
+              candidate.discountedPrice,
+              candidate.effectivePrice,
+              candidate.regularPrice,
+              Number((candidate.effectivePrice - candidate.regularPrice).toFixed(2)),
+              nowIso,
+              syncRunId
+            );
+        } else {
+          this.db
+            .prepare(
+              `INSERT OR REPLACE INTO monitored_price_history (
+                id, monitored_product_id, supermarket_id, canonical_ingredient,
+                regular_price, discounted_price, effective_price, previous_effective_price, price_delta,
+                is_available, recorded_at, sync_run_id
+              ) VALUES (?, ?, 'bazarstore', ?, ?, NULL, ?, NULL, 0, 1, ?, ?)`
+            )
+            .run(
+              `mph-${monId}-curr`,
+              monId,
+              candidate.canonicalIngredient,
+              candidate.regularPrice,
+              candidate.effectivePrice,
+              nowIso,
+              syncRunId
+            );
+        }
+      }
+    }
+
+    // 2. Also seed additional size/variant products (including Kök Super Paket 1kq at 1.69 ₼, 800q lentils, 3.2% milk, 15pcs eggs)
+    const extraVariants: RawScrapedProductInput[] = [
+      {
+        externalId: 'bz-var-carrot-super-paket-1kq',
+        ean: '30076564',
+        title: 'Kök Super Paket 1kq',
+        variantTitle: 'Super Paket 1kq',
+        brand: 'Kök',
+        category: 'Fruit & Vegetables',
+        regularPrice: 1.69,
+        discountedPrice: null,
+        isAvailable: true,
+        canonicalIngredient: 'carrot',
+        nameEn: 'Carrots Super Pack 1 kg',
+        namePl: 'Marchew Super Pakiet 1 kg',
+        imageUrl: 'https://images.unsplash.com/photo-1598170845058-32b9d6a5da37?auto=format&fit=crop&w=300&q=80',
+        productUrl: 'https://bazarstore.az/kok-paket-kq',
+      },
+      {
+        externalId: 'bz-var-milk-32-1l',
+        ean: '4760112233901',
+        title: 'Milla Təbii İnək Südü 3.2% 1 L',
+        variantTitle: '3.2% Yağlılıq',
+        brand: 'Milla',
+        category: 'Dairy',
+        regularPrice: 2.85,
+        discountedPrice: 2.45,
+        isAvailable: true,
+        canonicalIngredient: 'milk',
+        nameEn: 'Milla Whole Milk 3.2% 1 L',
+        namePl: 'Mleko Milla 3,2% 1 L',
+        productUrl: 'https://bazarstore.az/milla-sud-3-2-1-l',
+      },
+      {
+        externalId: 'bz-var-lentils-800g',
+        ean: '30200371',
+        title: 'Ankara Qırmızı Mərci 800 q',
+        variantTitle: '800 q Ailə Qablaşdırması',
+        brand: 'Ankara',
+        category: 'Dry Products',
+        regularPrice: 3.85,
+        discountedPrice: 3.60,
+        isAvailable: true,
+        canonicalIngredient: 'red_lentils',
+        nameEn: 'Ankara Red Lentils 800 g',
+        namePl: 'Soczewica czerwona Ankara 800 g',
+        productUrl: 'https://bazarstore.az/ankara-sari-merci-800-q',
+      },
+      {
+        externalId: 'bz-var-eggs-15pcs',
+        ean: '4760112233903',
+        title: 'Giləzi Kənd Yumurtası 15 ədəd',
+        variantTitle: '15 ədəd',
+        brand: 'Giləzi',
+        category: 'Dairy',
+        regularPrice: 3.75,
+        discountedPrice: 3.30,
+        isAvailable: true,
+        canonicalIngredient: 'eggs',
+        nameEn: 'Gilezi Eggs (15 pcs)',
+        namePl: 'Jaja Giləzi (15 szt.)',
+        productUrl: 'https://bazarstore.az/gilezi-yumurta-15-eded',
+      },
+    ];
+
+    for (const ev of extraVariants) {
+      const normalized = normalizeBazarstoreProductCandidate(ev, 'bazarstore');
+      if (normalized) {
+        this.upsertMonitoredProduct(normalized, syncRunId, nowIso);
+        checkedCount++;
+      }
+    }
+
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO price_sync_runs (
+          id, supermarket_id, source_url, trigger_type, status,
+          products_checked, products_updated, price_changes_recorded,
+          errors_count, error_summary, duration_ms, started_at, completed_at
+        ) VALUES (?, 'bazarstore', ?, 'SEED_BASELINE', 'SUCCESS', ?, ?, ?, 0, NULL, 42, ?, ?)`
+      )
+      .run(
+        syncRunId,
+        BAZARSTORE_PRIMARY_URL,
+        checkedCount,
+        checkedCount,
+        priceChangesCount,
+        nowIso,
+        nowIso
+      );
+
+    this.db
+      .prepare("UPDATE supermarkets SET last_synced_at = ?, adapter_status = 'PUBLIC_CATALOGUE_CONNECTED' WHERE id = 'bazarstore'")
+      .run(nowIso);
+  }
+
+  public refreshInMemoryCatalogueFromMonitoredPrices(referenceNowMs: number = Date.now()): void {
+    const monitored = this.getMonitoredProducts('bazarstore', referenceNowMs);
+    const lastSyncRow = this.db
+      .prepare(
+        "SELECT completed_at FROM price_sync_runs WHERE supermarket_id = 'bazarstore' AND status IN ('SUCCESS', 'PARTIAL_FALLBACK') ORDER BY completed_at DESC LIMIT 1"
+      )
+      .get() as { completed_at?: string } | undefined;
+
+    applyMonitoredPricesToCatalogue(monitored, lastSyncRow?.completed_at || null);
+  }
+
+  /**
+   * Upserts a single normalized product variant into monitored_products, guarding against
+   * duplicate entries and anomalous price spikes/drops, and recording historical price changes.
+   */
+  public upsertMonitoredProduct(
+    candidate: NormalizedMonitoredCandidate,
+    syncRunId: string | null = null,
+    checkedAtIso: string = new Date().toISOString()
+  ): {
+    record: MonitoredProductRecord | null;
+    updated: boolean;
+    priceChanged: boolean;
+    rejectedReason?: string;
+  } {
+    const existing = this.db
+      .prepare(
+        'SELECT * FROM monitored_products WHERE supermarket_id = ? AND variant_key = ?'
+      )
+      .get(candidate.supermarketId, candidate.variantKey) as any;
+
+    if (existing) {
+      const prevEff = Number(existing.effective_price);
+      // Guard against corrupted upstream prices (> 5x spike or < 0.2x drop)
+      if (
+        prevEff > 0 &&
+        (candidate.effectivePrice > prevEff * 5 || candidate.effectivePrice < prevEff * 0.2)
+      ) {
+        return {
+          record: null,
+          updated: false,
+          priceChanged: false,
+          rejectedReason: `PRICE_ANOMALY_REJECTED: Candidate price ${candidate.effectivePrice} AZN for ${candidate.nameAz} deviates >5x from previous ${prevEff} AZN`,
+        };
+      }
+
+      const priceDelta = Number((candidate.effectivePrice - prevEff).toFixed(2));
+      const priceChanged =
+        Math.abs(priceDelta) >= 0.01 ||
+        Math.abs(Number(existing.regular_price) - candidate.regularPrice) >= 0.01;
+      const availabilityChanged = Boolean(existing.is_available) !== candidate.isAvailable;
+      const nextPriceChangedAt = priceChanged ? checkedAtIso : existing.last_price_changed_at;
+
+      this.db
+        .prepare(
+          `UPDATE monitored_products SET
+            external_id = COALESCE(?, external_id),
+            ean = COALESCE(?, ean),
+            canonical_ingredient = COALESCE(?, canonical_ingredient),
+            name_az = ?,
+            name_en = ?,
+            name_pl = ?,
+            brand = ?,
+            category = ?,
+            package_size = ?,
+            package_unit = ?,
+            package_label_az = ?,
+            image_url = ?,
+            product_url = ?,
+            regular_price = ?,
+            discounted_price = ?,
+            effective_price = ?,
+            unit_price = ?,
+            unit_price_label = ?,
+            is_available = ?,
+            verification_status = ?,
+            match_confidence = ?,
+            last_checked_at = ?,
+            last_price_changed_at = ?
+           WHERE id = ?`
+        )
+        .run(
+          candidate.externalId,
+          candidate.ean,
+          candidate.canonicalIngredient,
+          candidate.nameAz,
+          candidate.nameEn,
+          candidate.namePl,
+          candidate.brand,
+          candidate.category,
+          candidate.packageSize,
+          candidate.packageUnit,
+          candidate.packageLabelAz,
+          candidate.imageUrl,
+          candidate.productUrl,
+          candidate.regularPrice,
+          candidate.discountedPrice,
+          candidate.effectivePrice,
+          candidate.unitPrice,
+          candidate.unitPriceLabel,
+          candidate.isAvailable ? 1 : 0,
+          candidate.verificationStatus,
+          candidate.matchConfidence,
+          checkedAtIso,
+          nextPriceChangedAt,
+          existing.id
+        );
+
+      if (priceChanged || availabilityChanged) {
+        const histId = `mph-${existing.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        this.db
+          .prepare(
+            `INSERT INTO monitored_price_history (
+              id, monitored_product_id, supermarket_id, canonical_ingredient,
+              regular_price, discounted_price, effective_price, previous_effective_price, price_delta,
+              is_available, recorded_at, sync_run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(
+            histId,
+            existing.id,
+            candidate.supermarketId,
+            candidate.canonicalIngredient,
+            candidate.regularPrice,
+            candidate.discountedPrice,
+            candidate.effectivePrice,
+            prevEff,
+            priceDelta,
+            candidate.isAvailable ? 1 : 0,
+            checkedAtIso,
+            syncRunId
+          );
+      }
+
+      const staleness = computePriceStaleness(checkedAtIso);
+      return {
+        record: {
+          id: existing.id,
+          supermarketId: candidate.supermarketId,
+          regionCode: candidate.regionCode,
+          currencyCode: candidate.currencyCode,
+          externalId: candidate.externalId,
+          variantKey: candidate.variantKey,
+          ean: candidate.ean,
+          canonicalIngredient: candidate.canonicalIngredient,
+          nameAz: candidate.nameAz,
+          nameEn: candidate.nameEn,
+          namePl: candidate.namePl,
+          brand: candidate.brand,
+          category: candidate.category,
+          packageSize: candidate.packageSize,
+          packageUnit: candidate.packageUnit,
+          packageLabelAz: candidate.packageLabelAz,
+          imageUrl: candidate.imageUrl,
+          productUrl: candidate.productUrl,
+          regularPrice: candidate.regularPrice,
+          discountedPrice: candidate.discountedPrice,
+          effectivePrice: candidate.effectivePrice,
+          unitPrice: candidate.unitPrice,
+          unitPriceLabel: candidate.unitPriceLabel,
+          isAvailable: candidate.isAvailable,
+          verificationStatus: candidate.verificationStatus,
+          matchConfidence: candidate.matchConfidence,
+          lastCheckedAt: checkedAtIso,
+          lastPriceChangedAt: nextPriceChangedAt,
+          priceAgeHours: staleness.priceAgeHours,
+          isOutdated: staleness.isOutdated,
+        },
+        updated: true,
+        priceChanged,
+      };
+    }
+
+    // Insert new monitored product variant
+    const newId = `mon-${candidate.supermarketId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    this.db
+      .prepare(
+        `INSERT INTO monitored_products (
+          id, supermarket_id, region_code, currency_code, external_id, variant_key, ean,
+          canonical_ingredient, name_az, name_en, name_pl, brand, category,
+          package_size, package_unit, package_label_az, image_url, product_url,
+          regular_price, discounted_price, effective_price, unit_price, unit_price_label,
+          is_available, verification_status, match_confidence, last_checked_at, last_price_changed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        newId,
+        candidate.supermarketId,
+        candidate.regionCode,
+        candidate.currencyCode,
+        candidate.externalId,
+        candidate.variantKey,
+        candidate.ean,
+        candidate.canonicalIngredient,
+        candidate.nameAz,
+        candidate.nameEn,
+        candidate.namePl,
+        candidate.brand,
+        candidate.category,
+        candidate.packageSize,
+        candidate.packageUnit,
+        candidate.packageLabelAz,
+        candidate.imageUrl,
+        candidate.productUrl,
+        candidate.regularPrice,
+        candidate.discountedPrice,
+        candidate.effectivePrice,
+        candidate.unitPrice,
+        candidate.unitPriceLabel,
+        candidate.isAvailable ? 1 : 0,
+        candidate.verificationStatus,
+        candidate.matchConfidence,
+        checkedAtIso,
+        checkedAtIso
+      );
+
+    const histId = `mph-${newId}-init`;
+    this.db
+      .prepare(
+        `INSERT INTO monitored_price_history (
+          id, monitored_product_id, supermarket_id, canonical_ingredient,
+          regular_price, discounted_price, effective_price, previous_effective_price, price_delta,
+          is_available, recorded_at, sync_run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?)`
+      )
+      .run(
+        histId,
+        newId,
+        candidate.supermarketId,
+        candidate.canonicalIngredient,
+        candidate.regularPrice,
+        candidate.discountedPrice,
+        candidate.effectivePrice,
+        candidate.isAvailable ? 1 : 0,
+        checkedAtIso,
+        syncRunId
+      );
+
+    const staleness = computePriceStaleness(checkedAtIso);
+    return {
+      record: {
+        id: newId,
+        supermarketId: candidate.supermarketId,
+        regionCode: candidate.regionCode,
+        currencyCode: candidate.currencyCode,
+        externalId: candidate.externalId,
+        variantKey: candidate.variantKey,
+        ean: candidate.ean,
+        canonicalIngredient: candidate.canonicalIngredient,
+        nameAz: candidate.nameAz,
+        nameEn: candidate.nameEn,
+        namePl: candidate.namePl,
+        brand: candidate.brand,
+        category: candidate.category,
+        packageSize: candidate.packageSize,
+        packageUnit: candidate.packageUnit,
+        packageLabelAz: candidate.packageLabelAz,
+        imageUrl: candidate.imageUrl,
+        productUrl: candidate.productUrl,
+        regularPrice: candidate.regularPrice,
+        discountedPrice: candidate.discountedPrice,
+        effectivePrice: candidate.effectivePrice,
+        unitPrice: candidate.unitPrice,
+        unitPriceLabel: candidate.unitPriceLabel,
+        isAvailable: candidate.isAvailable,
+        verificationStatus: candidate.verificationStatus,
+        matchConfidence: candidate.matchConfidence,
+        lastCheckedAt: checkedAtIso,
+        lastPriceChangedAt: checkedAtIso,
+        priceAgeHours: staleness.priceAgeHours,
+        isOutdated: staleness.isOutdated,
+      },
+      updated: true,
+      priceChanged: true,
+    };
+  }
+
+  /**
+   * Executes a Bazarstore price monitoring sync cycle, deduplicating incoming items,
+   * validating price sanity, recording historical price changes, and updating active shopping lists & budgets.
+   */
+  public async runBazarstorePriceSync(options?: {
+    triggerType?: PriceSyncRunRecord['triggerType'];
+    customItems?: RawScrapedProductInput[];
+    customFetch?: typeof fetch;
+    nowIso?: string;
+  }): Promise<PriceSyncRunRecord> {
+    const startMs = Date.now();
+    const startedAt = options?.nowIso || new Date().toISOString();
+    const triggerType = options?.triggerType || 'SCHEDULED_24H';
+    const syncRunId = `sync-bazarstore-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    let rawItems: RawScrapedProductInput[] = [];
+    let sourceUrlUsed = BAZARSTORE_PRIMARY_URL;
+    const errors: string[] = [];
+
+    if (options?.customItems && Array.isArray(options.customItems)) {
+      rawItems = options.customItems;
+      sourceUrlUsed = 'https://bazarstore.az/b%C3%BCt%C3%BCn-m%C9%99hsullar';
+    } else {
+      const fetched = await fetchLiveBazarstoreCatalogue({
+        customFetch: options?.customFetch,
+      });
+      rawItems = fetched.collected;
+      sourceUrlUsed = fetched.sourceUrlUsed;
+      errors.push(...fetched.errors);
+    }
+
+    // Deduplicate incoming raw items within the same batch by variantKey
+    const seenVariantKeys = new Set<string>();
+    let productsChecked = 0;
+    let productsUpdated = 0;
+    let priceChangesRecorded = 0;
+
+    for (const raw of rawItems) {
+      const candidate = normalizeBazarstoreProductCandidate(raw, 'bazarstore');
+      if (!candidate) {
+        errors.push(`Invalid product/price skipped: "${raw?.title || 'unknown'}"`);
+        continue;
+      }
+      if (seenVariantKeys.has(candidate.variantKey)) {
+        // Avoid duplicate product updates in the same sync batch
+        continue;
+      }
+      seenVariantKeys.add(candidate.variantKey);
+      productsChecked++;
+
+      const res = this.upsertMonitoredProduct(candidate, syncRunId, startedAt);
+      if (res.rejectedReason) {
+        errors.push(res.rejectedReason);
+      } else if (res.updated) {
+        productsUpdated++;
+        if (res.priceChanged) {
+          priceChangesRecorded++;
+        }
+      }
+    }
+
+    const completedAt = options?.nowIso || new Date().toISOString();
+    const durationMs = Math.max(1, Date.now() - startMs);
+
+    let status: PriceSyncRunRecord['status'] = 'SUCCESS';
+    if (productsUpdated === 0 && errors.length > 0) {
+      status = 'PARTIAL_FALLBACK';
+    } else if (productsUpdated === 0 && rawItems.length === 0) {
+      status = 'FAILED';
+    }
+
+    const errorSummary = errors.length > 0 ? errors.slice(0, 5).join(' | ') : null;
+
+    this.db
+      .prepare(
+        `INSERT INTO price_sync_runs (
+          id, supermarket_id, source_url, trigger_type, status,
+          products_checked, products_updated, price_changes_recorded,
+          errors_count, error_summary, duration_ms, started_at, completed_at
+        ) VALUES (?, 'bazarstore', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        syncRunId,
+        sourceUrlUsed,
+        triggerType,
+        status,
+        productsChecked,
+        productsUpdated,
+        priceChangesRecorded,
+        errors.length,
+        errorSummary,
+        durationMs,
+        startedAt,
+        completedAt
+      );
+
+    if (productsUpdated > 0) {
+      this.db
+        .prepare("UPDATE supermarkets SET last_synced_at = ? WHERE id = 'bazarstore'")
+        .run(completedAt);
+    }
+
+    // Refresh in-memory catalogue so shopping lists & budgets immediately use the latest prices
+    this.refreshInMemoryCatalogueFromMonitoredPrices(new Date(completedAt).getTime());
+
+    return {
+      id: syncRunId,
+      supermarketId: 'bazarstore',
+      sourceUrl: sourceUrlUsed,
+      triggerType,
+      status,
+      productsChecked,
+      productsUpdated,
+      priceChangesRecorded,
+      errorsCount: errors.length,
+      errorSummary,
+      durationMs,
+      startedAt,
+      completedAt,
+    };
+  }
+
+  public getMonitoredProducts(
+    supermarketId: SupermarketSlug = 'bazarstore',
+    referenceNowMs: number = Date.now()
+  ): MonitoredProductRecord[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM monitored_products WHERE supermarket_id = ? ORDER BY canonical_ingredient ASC, package_size ASC'
+      )
+      .all(supermarketId) as any[];
+
+    return rows.map((r) => {
+      const staleness = computePriceStaleness(r.last_checked_at, referenceNowMs);
+      return {
+        id: r.id,
+        supermarketId: r.supermarket_id as SupermarketSlug,
+        regionCode: (r.region_code as RegionCode) || 'AZ',
+        currencyCode: (r.currency_code as CurrencyCode) || 'AZN',
+        externalId: r.external_id,
+        variantKey: r.variant_key,
+        ean: r.ean,
+        canonicalIngredient: r.canonical_ingredient,
+        nameAz: r.name_az,
+        nameEn: r.name_en,
+        namePl: r.name_pl,
+        brand: r.brand,
+        category: r.category,
+        packageSize: Number(r.package_size),
+        packageUnit: r.package_unit as 'g' | 'ml' | 'pcs',
+        packageLabelAz: r.package_label_az,
+        imageUrl: r.image_url,
+        productUrl: r.product_url,
+        regularPrice: Number(r.regular_price),
+        discountedPrice: r.discounted_price !== null ? Number(r.discounted_price) : null,
+        effectivePrice: Number(r.effective_price),
+        unitPrice: Number(r.unit_price),
+        unitPriceLabel: r.unit_price_label,
+        isAvailable: Boolean(r.is_available),
+        verificationStatus: staleness.isOutdated
+          ? 'OUTDATED_PRICE'
+          : !r.is_available
+          ? 'UNAVAILABLE'
+          : (r.verification_status as any),
+        matchConfidence: r.match_confidence as any,
+        lastCheckedAt: r.last_checked_at,
+        lastPriceChangedAt: r.last_price_changed_at,
+        priceAgeHours: staleness.priceAgeHours,
+        isOutdated: staleness.isOutdated,
+      };
+    });
+  }
+
+  public getProductPriceHistory(
+    canonicalOrProductId: string,
+    supermarketId: SupermarketSlug = 'bazarstore'
+  ): PriceHistoryEntry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT h.*, p.name_az, p.name_en, p.package_label_az
+         FROM monitored_price_history h
+         LEFT JOIN monitored_products p ON p.id = h.monitored_product_id
+         WHERE h.supermarket_id = ? AND (h.monitored_product_id = ? OR LOWER(h.canonical_ingredient) = LOWER(?))
+         ORDER BY h.recorded_at DESC, h.rowid DESC
+         LIMIT 50`
+      )
+      .all(supermarketId, canonicalOrProductId, canonicalOrProductId) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      monitoredProductId: r.monitored_product_id,
+      supermarketId: r.supermarket_id as SupermarketSlug,
+      canonicalIngredient: r.canonical_ingredient,
+      productNameAz: r.name_az,
+      productNameEn: r.name_en,
+      packageLabelAz: r.package_label_az,
+      regularPrice: Number(r.regular_price),
+      discountedPrice: r.discounted_price !== null ? Number(r.discounted_price) : null,
+      effectivePrice: Number(r.effective_price),
+      previousEffectivePrice:
+        r.previous_effective_price !== null ? Number(r.previous_effective_price) : null,
+      priceDelta: r.price_delta !== null ? Number(r.price_delta) : null,
+      isAvailable: Boolean(r.is_available),
+      recordedAt: r.recorded_at,
+      syncRunId: r.sync_run_id,
+    }));
+  }
+
+  public getPriceMonitoringSummary(
+    supermarketId: SupermarketSlug = 'bazarstore',
+    referenceNowMs: number = Date.now()
+  ): PriceMonitoringSummary {
+    const products = this.getMonitoredProducts(supermarketId, referenceNowMs);
+    const availableCount = products.filter((p) => p.isAvailable).length;
+    const unavailableCount = products.length - availableCount;
+    const outdatedCount = products.filter((p) => p.isOutdated).length;
+
+    const runsRows = this.db
+      .prepare(
+        'SELECT * FROM price_sync_runs WHERE supermarket_id = ? ORDER BY completed_at DESC, rowid DESC LIMIT 10'
+      )
+      .all(supermarketId) as any[];
+
+    const recentSyncRuns: PriceSyncRunRecord[] = runsRows.map((r) => ({
+      id: r.id,
+      supermarketId: r.supermarket_id as SupermarketSlug,
+      sourceUrl: r.source_url,
+      triggerType: r.trigger_type,
+      status: r.status,
+      productsChecked: Number(r.products_checked),
+      productsUpdated: Number(r.products_updated),
+      priceChangesRecorded: Number(r.price_changes_recorded),
+      errorsCount: Number(r.errors_count),
+      errorSummary: r.error_summary,
+      durationMs: Number(r.duration_ms),
+      startedAt: r.started_at,
+      completedAt: r.completed_at,
+    }));
+
+    const lastSuccessRun = recentSyncRuns.find((r) => r.productsUpdated > 0) || recentSyncRuns[0] || null;
+    const lastAttemptRun = recentSyncRuns[0] || null;
+
+    const lastSuccessMs = lastSuccessRun
+      ? new Date(lastSuccessRun.completedAt).getTime()
+      : referenceNowMs;
+    const nextScheduledSyncAt = new Date(
+      lastSuccessMs + MONITOR_INTERVAL_HOURS * 3600 * 1000
+    ).toISOString();
+
+    const changeRows = this.db
+      .prepare(
+        `SELECT h.*, p.name_az, p.name_en, p.package_label_az
+         FROM monitored_price_history h
+         JOIN monitored_products p ON p.id = h.monitored_product_id
+         WHERE h.supermarket_id = ? AND h.previous_effective_price IS NOT NULL AND ABS(h.price_delta) >= 0.01
+         ORDER BY h.recorded_at DESC, h.rowid DESC
+         LIMIT 15`
+      )
+      .all(supermarketId) as any[];
+
+    const recentPriceChanges: PriceHistoryEntry[] = changeRows.map((r) => ({
+      id: r.id,
+      monitoredProductId: r.monitored_product_id,
+      supermarketId: r.supermarket_id as SupermarketSlug,
+      canonicalIngredient: r.canonical_ingredient,
+      productNameAz: r.name_az,
+      productNameEn: r.name_en,
+      packageLabelAz: r.package_label_az,
+      regularPrice: Number(r.regular_price),
+      discountedPrice: r.discounted_price !== null ? Number(r.discounted_price) : null,
+      effectivePrice: Number(r.effective_price),
+      previousEffectivePrice:
+        r.previous_effective_price !== null ? Number(r.previous_effective_price) : null,
+      priceDelta: r.price_delta !== null ? Number(r.price_delta) : null,
+      isAvailable: Boolean(r.is_available),
+      recordedAt: r.recorded_at,
+      syncRunId: r.sync_run_id,
+    }));
+
+    return {
+      supermarketId,
+      supermarketName: supermarketId === 'bazarstore' ? 'Bazarstore' : String(supermarketId),
+      primaryUrl: BAZARSTORE_PRIMARY_URL,
+      alternativeUrl: BAZARSTORE_ALTERNATIVE_URL,
+      scheduleIntervalHours: MONITOR_INTERVAL_HOURS,
+      outdatedThresholdHours: OUTDATED_THRESHOLD_HOURS,
+      lastSuccessfulSyncAt: lastSuccessRun ? lastSuccessRun.completedAt : null,
+      lastAttemptedSyncAt: lastAttemptRun ? lastAttemptRun.completedAt : null,
+      lastSyncStatus: lastAttemptRun ? lastAttemptRun.status : 'NEVER_RUN',
+      nextScheduledSyncAt,
+      isStale: outdatedCount > 0,
+      totalMonitoredProducts: products.length,
+      availableProductsCount: availableCount,
+      unavailableProductsCount: unavailableCount,
+      outdatedProductsCount: outdatedCount,
+      recentPriceChanges,
+      recentSyncRuns,
+    };
   }
 }

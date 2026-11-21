@@ -471,6 +471,9 @@ export function buildSmartShoppingList(params: {
       promoValidUntil: storePrice ? storePrice.promoValidUntil : null,
       storeChannel: storePrice ? storePrice.storeChannel : 'PHYSICAL_STORE',
       lastUpdatedAt: storePrice ? storePrice.lastUpdatedAt : new Date().toISOString(),
+      isAvailable: storePrice?.isAvailable ?? true,
+      isOutdated: storePrice?.isOutdated ?? false,
+      priceAgeHours: storePrice?.priceAgeHours ?? 0,
       matchConfidence,
       isPurchased,
       isManual: false,
@@ -508,7 +511,7 @@ export function buildSmartShoppingList(params: {
         (p) => p.canonicalIngredient === item.canonicalIngredient || p.id === item.matchedProductId
       );
       const priceRec = prod?.prices[store];
-      if (priceRec) {
+      if (priceRec && priceRec.isAvailable !== false) {
         availableCount++;
         storeTotal += item.recommendedPackages * priceRec.effectivePricePln;
         storeRegular += item.recommendedPackages * priceRec.regularPricePln;
@@ -518,8 +521,12 @@ export function buildSmartShoppingList(params: {
         } else {
           missingCount++;
         }
-        storeTotal += item.lineTotalPln;
-        storeRegular += item.regularLineTotalPln;
+        storeTotal += priceRec
+          ? item.recommendedPackages * priceRec.effectivePricePln
+          : item.lineTotalPln;
+        storeRegular += priceRec
+          ? item.recommendedPackages * priceRec.regularPricePln
+          : item.regularLineTotalPln;
       }
     }
 

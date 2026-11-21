@@ -259,6 +259,13 @@ function scoreRecipeForPlan(
   return score;
 }
 
+function sanitizePromptToken(raw: string): string {
+  return String(raw || '')
+    .replace(/[^\p{L}\p{N}\s,_-]/gu, '')
+    .trim()
+    .slice(0, 60);
+}
+
 /**
  * Optional external Gemini API call (server-side only).
  * If GEMINI_API_KEY is present, requests recipe rankings/selections from Gemini and validates them deterministically.
@@ -278,11 +285,18 @@ async function tryExternalGeminiSelection(
   const model = envObj?.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
   const regionLabel = regionCode === 'AZ' ? 'Azerbaijan' : 'Poland';
   try {
-    const prompt = `You are the MealPlanner AI dietitian for ${regionLabel} (region: ${regionCode}, currency: ${currencyCode}). Select a ${planDurationDays}-day meal plan (dayIndex 0..${planDurationDays - 1}) for a household of ${input.preferences.householdSize} with budget ${input.preferences.weeklyBudgetPln} ${currencyCode} at supermarket ${input.preferences.preferredSupermarket}.
-Food vibes: ${(input.preferences.foodVibes || []).join(', ') || 'balanced'}.
-Kitchen equipment: ${(input.preferences.kitchenEquipment || []).join(', ') || 'standard'}.
-Available validated recipe IDs: ${validPool.map((r) => `${r.id} (${r.mealType}, ${getRecipeBaseCostForCurrency(r, currencyCode)} ${currencyCode})`).join(', ')}.
+    const safeVibes = (input.preferences.foodVibes || []).map(sanitizePromptToken).filter(Boolean).join(', ') || 'balanced';
+    const safeEquip = (input.preferences.kitchenEquipment || []).map(sanitizePromptToken).filter(Boolean).join(', ') || 'standard';
+    const prompt = `You are the MealPlanner culinary assistant for ${regionLabel} (region: ${regionCode}, currency: ${currencyCode}). Select a ${planDurationDays}-day meal plan (dayIndex 0..${planDurationDays - 1}) for a household of ${input.preferences.householdSize} with budget ${input.preferences.weeklyBudgetPln} ${currencyCode} at supermarket ${input.preferences.preferredSupermarket}.
+Food vibes: ${safeVibes}.
+Kitchen equipment: ${safeEquip}.
+Do not make medical or clinical claims. Only select from the following pre-validated recipe IDs: ${validPool.map((r) => `${r.id} (${r.mealType}, ${getRecipeBaseCostForCurrency(r, currencyCode)} ${currencyCode})`).join(', ')}.
 Return JSON object mapping "dayIndex-mealType" to recipeId.`;
+
+    const abortSignal =
+      typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(8000)
+        : undefined;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -293,6 +307,7 @@ Return JSON object mapping "dayIndex-mealType" to recipeId.`;
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: { responseMimeType: 'application/json' },
         }),
+        ...(abortSignal ? { signal: abortSignal } : {}),
       }
     );
     if (!response.ok) return null;
@@ -473,8 +488,8 @@ export async function generateValidatedWeeklyMealPlan(
     meals: plannedMeals,
     planDurationDays,
     providerUsed,
-    notesPl: `Plan ${planDurationDays}-dniowy wygenerowany i zweryfikowany deterministycznie (${plannedMeals.length} posiłków dla ${preferences.householdSize} os., budżet ${formattedBudget} w sklepie ${storeUpper}).`,
-    notesEn: `${planDurationDays}-day plan generated and deterministically validated (${plannedMeals.length} meals for ${preferences.householdSize} people, tailored for ${formattedBudget} budget at ${storeUpper}).`,
-    notesAz: `${planDurationDays} günlük yemək planı yaradıldı və deterministik olaraq yoxlanıldı (${preferences.householdSize} nəfər üçün ${plannedMeals.length} yemək, ${storeUpper} marketində ${formattedBudget} büdcə).`,
+    notesPl: `Plan ${planDurationDays}-dniowy wygenerowany i zweryfikowany deterministycznie (${plannedMeals.length} posiłków dla ${preferences.householdSize} os., budżet ${formattedBudget} w sklepie ${storeUpper}). Wartości odżywcze mają charakter informacyjny i nie stanowią porady medycznej; zawsze sprawdzaj etykiety produktów pod kątem alergenów.`,
+    notesEn: `${planDurationDays}-day plan generated and deterministically validated (${plannedMeals.length} meals for ${preferences.householdSize} people, tailored for ${formattedBudget} budget at ${storeUpper}). Nutritional estimates are for informational planning only and not medical advice; always verify physical product labels for allergens.`,
+    notesAz: `${planDurationDays} günlük yemək planı yaradıldı və deterministik olaraq yoxlanıldı (${preferences.householdSize} nəfər üçün ${plannedMeals.length} yemək, ${storeUpper} marketində ${formattedBudget} büdcə). Qida dəyərləri yalnız məlumat xarakteri daşıyır və tibbi məsləhət deyil; allergenlər üçün həmişə məhsul etiketlərini yoxlayın.`,
   };
 }

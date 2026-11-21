@@ -265,6 +265,7 @@ export function buildDetailedCookingSteps(
       .map((i) => `${pickLocalizedText(lang, { en: i.nameEn, pl: i.namePl, az: i.nameAz })} (${formatScaledIngredientAmount(i, scale, lang)})`)
       .join(', ');
 
+    const minUnit = lang === 'az' ? 'dəq' : 'min';
     enrichedSteps.push({
       stepNumber: 1,
       title: pickLocalizedText(lang, {
@@ -277,7 +278,7 @@ export function buildDetailedCookingSteps(
         pl: `Umyj i odmierz wszystkie składniki na ${servings} ${servings === 1 ? 'porcję' : 'porcje/porcji'}: ${prepIngList}. Przygotuj potrzebne naczynia przed włączeniem palnika.`,
         az: `${servings} porsiya üçün bütün ərzaqları yuyun və ölçün: ${prepIngList}. Ocağı yandırmazdan əvvəl mətbəx qablarını hazır saxlayın.`,
       }),
-      durationLabel: `${Math.max(2, recipe.prepTimeMin)} min`,
+      durationLabel: `${Math.max(2, recipe.prepTimeMin)} ${minUnit}`,
       temperatureHint: null,
       stepIngredients: nonSeasoningIngs.slice(0, 4).map(formatIngSummary),
     });
@@ -349,7 +350,7 @@ export function buildDetailedCookingSteps(
         pl: `Podziel równo na ${servings} ${servings === 1 ? 'porcję' : 'porcje/porcji'} (${recipe.nutrition.caloriesKcal} kcal, ${recipe.nutrition.proteinG}g białka na porcję)${seasoningList ? `, dopraw do smaku (${seasoningList})` : ''} i podawaj od razu.`,
         az: `${servings} bərabər porsiyaya bölün (hər porsiyada ${recipe.nutrition.caloriesKcal} kkal, ${recipe.nutrition.proteinG}q zülal)${seasoningList ? `, zövqə görə ${seasoningList} əlavə edin` : ''} və süfrəyə verin.`,
       }),
-      durationLabel: '1 min',
+      durationLabel: lang === 'az' ? '1 dəq' : '1 min',
       temperatureHint: null,
       stepIngredients: seasoningIngs.map(formatIngSummary),
     });

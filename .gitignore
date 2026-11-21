@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Environment & Secrets (NEVER commit API keys, JWT secrets, or signing credentials)
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+key.properties
+local.properties
+
+# Build & Intermediate Outputs
+mealplanner/dist/
+mealplanner/android/app/build/inter/
+mealplanner/android/.gradle/
+mealplanner/android/build/
+.tools/
+
+# Runtime SQLite temporary files
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+mealplanner/data/*-test.sqlite

@@ -16,6 +16,20 @@ import {
   getRecipeCookingMetadata,
 } from '../src/shared/recipeGuide';
 import {
+  toLocaleUpper,
+  localizeQuantityLabel,
+  formatMinutes,
+  formatItemsCount,
+} from '../src/shared/regionConfig';
+import { translations } from '../src/shared/i18n';
+import {
+  extractPackageQuantityFromTitle,
+  normalizeBazarstoreProductCandidate,
+  parseBazarstoreHtmlCatalogue,
+  parseBazarstoreShopifyJson,
+  computePriceStaleness,
+} from '../src/server/monitoring/bazarstoreMonitor';
+import {
   hashPassword,
   verifyPassword,
   signToken,
@@ -512,6 +526,309 @@ describe('MealPlanner Core Business Logic & Integration Suite', () => {
         .items.find((i) => i.canonicalIngredient === 'chicken_breast');
       expect(updatedChickenItem?.requiredAmount).toBeGreaterThan(2000);
       expect(afterIngPlan.totalEstimatedBasketPln).toBeGreaterThan(initialBasketCost);
+    });
+
+    it('verifies Azerbaijani typography (Ə, ə, Ğ, ğ, I, ı, İ, i, Ö, ö, Ş, ş, Ü, ü, Ç, ç), locale-aware casing, and EN/PL/AZ translation completeness', () => {
+      // 1. Verify EN, PL, AZ translation keys are 100% symmetric and non-empty
+      const enKeys = Object.keys(translations.en).sort();
+      const plKeys = Object.keys(translations.pl).sort();
+      const azKeys = Object.keys(translations.az).sort();
+      expect(plKeys).toEqual(enKeys);
+      expect(azKeys).toEqual(enKeys);
+
+      // 2. Verify authentic Azerbaijani diacritics across UI & recipe corpus
+      const azCorpus = JSON.stringify(translations.az) + JSON.stringify(SEED_RECIPES.map((r) => ({ t: r.titleAz, d: r.descriptionAz, i: r.instructionsAz })));
+      for (const ch of ['Ə', 'ə', 'ğ', 'ı', 'İ', 'ö', 'ş', 'ü', 'ç']) {
+        expect(azCorpus).toContain(ch);
+      }
+
+      // 3. Verify locale-aware uppercase preserves dotted İ (U+0130) and dotless I (U+0049) in Azerbaijani
+      expect(toLocaleUpper('i̇nfo və alış-veriş', 'az')).toContain('ALIŞ-VERİŞ');
+      expect(toLocaleUpper('səhər yeməyi', 'az')).toBe('SƏHƏR YEMƏYİ');
+
+      // 4. Verify localized quantity labels, minutes, and pluralized item counts across EN, PL, AZ
+      expect(localizeQuantityLabel('500 g', 'az')).toBe('500 q');
+      expect(localizeQuantityLabel('1 kg', 'az')).toBe('1 kq');
+      expect(localizeQuantityLabel('10 szt.', 'az')).toBe('10 ədəd');
+      expect(localizeQuantityLabel('10 ədəd', 'pl')).toBe('10 szt.');
+      expect(localizeQuantityLabel('10 szt.', 'en')).toBe('10 pcs');
+
+      expect(formatMinutes(25, 'en')).toBe('25 min');
+      expect(formatMinutes(25, 'pl')).toBe('25 min');
+      expect(formatMinutes(25, 'az')).toBe('25 dəq');
+
+      expect(formatItemsCount(1, 'en')).toBe('1 item');
+      expect(formatItemsCount(4, 'en')).toBe('4 items');
+      expect(formatItemsCount(1, 'pl')).toBe('1 produkt');
+      expect(formatItemsCount(3, 'pl')).toBe('3 produkty');
+      expect(formatItemsCount(6, 'pl')).toBe('6 produktów');
+      expect(formatItemsCount(5, 'az')).toBe('5 məhsul');
+    });
+  });
+
+  describe('8. Bazar Store 24-Hour Automated Price Monitoring, Variant Disambiguation, Price History & Outdated Price Detection', () => {
+    let db: MealPlannerDatabase;
+
+    beforeEach(async () => {
+      db = new MealPlannerDatabase(':memory:');
+      await db.seedIfEmpty();
+    });
+
+    it('extracts package quantities and distinguishes different sizes and variants accurately without duplicates', () => {
+      expect(extractPackageQuantityFromTitle('Səba Toyuq Döş Əti 1.2 kq')).toEqual({
+        packageSize: 1200,
+        packageUnit: 'g',
+        packageLabelAz: '1.2 kq',
+      });
+      expect(extractPackageQuantityFromTitle('Azərsun Qırmızı Mərcimək 400 q')).toEqual({
+        packageSize: 400,
+        packageUnit: 'g',
+        packageLabelAz: '400 q',
+      });
+      expect(extractPackageQuantityFromTitle('Milla Təbii Süd 2.5% 1 L')).toEqual({
+        packageSize: 1000,
+        packageUnit: 'ml',
+        packageLabelAz: '1 L',
+      });
+      expect(extractPackageQuantityFromTitle('Giləzi Kənd Yumurtası 15 ədəd')).toEqual({
+        packageSize: 15,
+        packageUnit: 'pcs',
+        packageLabelAz: '15 ədəd',
+      });
+      expect(extractPackageQuantityFromTitle('Kök kq')).toEqual({
+        packageSize: 1000,
+        packageUnit: 'g',
+        packageLabelAz: '1 kq',
+      });
+      expect(extractPackageQuantityFromTitle('Kök Super Paket 1kq')).toEqual({
+        packageSize: 1000,
+        packageUnit: 'g',
+        packageLabelAz: '1 kq',
+      });
+      expect(extractPackageQuantityFromTitle('Çil-Çil Yumurta Ağ 10 lu')).toEqual({
+        packageSize: 10,
+        packageUnit: 'pcs',
+        packageLabelAz: '10 ədəd',
+      });
+
+      // Verify non-food / pet food items containing ingredient words are excluded from canonical ingredient matching
+      const catFoodWithCarrot = normalizeBazarstoreProductCandidate({
+        title: 'PURİNA ONE PİŞİK YEMİ 75 Q MAL ƏTLİ KÖK',
+        regularPrice: 1.05,
+      })!;
+      expect(catFoodWithCarrot.canonicalIngredient).toBeNull();
+
+      // Verify all 18 seeded recipes (including Mərcimək souslu makaron / rec-pasta-lentil-bolognese) have valid image URLs
+      const lentilPasta = SEED_RECIPES.find((r) => r.id === 'rec-pasta-lentil-bolognese')!;
+      expect(lentilPasta).toBeTruthy();
+      expect(lentilPasta.imageUrl).not.toContain('photo-1621996346565-e3d5d6281298');
+      expect(lentilPasta.imageUrl).toContain('https://images.unsplash.com/photo-');
+
+      const milk25 = normalizeBazarstoreProductCandidate({
+        title: 'Milla Süd 2.5% 1 L',
+        regularPrice: 2.59,
+        discountedPrice: 2.15,
+      })!;
+      const milk32 = normalizeBazarstoreProductCandidate({
+        title: 'Milla Süd 3.2% 1 L',
+        regularPrice: 2.85,
+        discountedPrice: 2.45,
+      })!;
+      expect(milk25.canonicalIngredient).toBe('milk');
+      expect(milk32.canonicalIngredient).toBe('milk');
+      expect(milk25.variantKey).not.toBe(milk32.variantKey);
+      expect(milk25.effectivePrice).toBe(2.15);
+      expect(milk25.regularPrice).toBe(2.59);
+    });
+
+    it('parses Shopify JSON, JSON-LD, and Bazarstore nopCommerce product-item HTML cards with hex entities', () => {
+      const shopifyParsed = parseBazarstoreShopifyJson({
+        products: [
+          {
+            id: 9901,
+            title: 'Besta Basmati Düyü 1 kq',
+            handle: 'besta-basmati-duyu-1-kq',
+            vendor: 'Besta',
+            product_type: 'Quru Ərzaqlar',
+            images: [{ src: 'https://cdn.shopify.com/rice.jpg' }],
+            variants: [
+              {
+                id: 99011,
+                title: '1 kq',
+                barcode: '30201206',
+                price: '3.99',
+                compare_at_price: '4.55',
+                available: true,
+                grams: 1000,
+              },
+            ],
+          },
+        ],
+      });
+      expect(shopifyParsed.length).toBe(1);
+      expect(shopifyParsed[0].regularPrice).toBe(4.55);
+      expect(shopifyParsed[0].discountedPrice).toBe(3.99);
+      expect(shopifyParsed[0].brand).toBe('Besta');
+
+      const htmlParsed = parseBazarstoreHtmlCatalogue(`
+        <html>
+          <head>
+            <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Product",
+                "name": "Səba Təzə Toyuq Filesi 1 kq",
+                "sku": "BZ-CHICKEN-1KG",
+                "brand": { "@type": "Brand", "name": "Səba" },
+                "offers": {
+                  "@type": "Offer",
+                  "price": "10.90",
+                  "priceCurrency": "AZN",
+                  "availability": "https://schema.org/InStock"
+                }
+              }
+            </script>
+          </head>
+          <body>
+            <div class="product-item" data-productid="16745" data-bzdl-item='{"item_id":"30036089","item_name":"K&#xF6;k kq","item_brand":"MEYVE-TEREVEZ","price":1.29}'>
+              <div class="details">
+                <h2 class="product-title"><a href="/kok-yerli-kg">K&#xF6;k kq</a></h2>
+                <div class="prices">
+                  <span class="price old-price">1,49 &#x20BC;</span>
+                  <span class="price actual-price">1,29 &#x20BC;</span>
+                </div>
+              </div>
+            </div>
+          </body>
+        </html>
+      `);
+      expect(htmlParsed.length).toBe(2);
+      expect(htmlParsed[0].title).toBe('Səba Təzə Toyuq Filesi 1 kq');
+      expect(htmlParsed[0].regularPrice).toBe(10.9);
+      expect(htmlParsed[1].title).toBe('Kök kq');
+      expect(htmlParsed[1].regularPrice).toBe(1.49);
+      expect(htmlParsed[1].discountedPrice).toBe(1.29);
+    });
+
+    it('updates Bazarstore prices, matches Kök kq (1.29 ₼ / 1.49 ₼) & Kök Super Paket 1kq (1.69 ₼), records historical price changes, and rejects anomalies', async () => {
+      // Switch user to Azerbaijan + Bazarstore
+      db.updatePreferences('user-farhad-1', {
+        regionCode: 'AZ',
+        currencyCode: 'AZN',
+        preferredSupermarket: 'bazarstore',
+      });
+
+      const beforeList = db.getShoppingList('user-farhad-1');
+      const carrotBefore = beforeList.items.find((i) => i.canonicalIngredient === 'carrot');
+      if (carrotBefore) {
+        expect(carrotBefore.nameAz).toBe('Kök kq');
+        expect(carrotBefore.unitPricePln).toBe(1.29);
+        expect(carrotBefore.regularLineTotalPln).toBe(1.49 * carrotBefore.recommendedPackages);
+        expect(carrotBefore.lineTotalPln).toBe(1.29 * carrotBefore.recommendedPackages);
+      }
+
+      const chickenBefore = beforeList.items.find((i) => i.canonicalIngredient === 'chicken_breast')!;
+      expect(chickenBefore.unitPricePln).toBe(10.9);
+
+      // Verify both Kök kq (1.29 ₼) and Kök Super Paket 1kq (1.69 ₼) exist in monitored_products
+      const monitoredCarrots = db
+        .getMonitoredProducts('bazarstore')
+        .filter((p) => p.canonicalIngredient === 'carrot');
+      expect(monitoredCarrots.length).toBeGreaterThanOrEqual(2);
+      expect(monitoredCarrots.some((c) => c.effectivePrice === 1.29 && c.regularPrice === 1.49)).toBe(true);
+      expect(monitoredCarrots.some((c) => c.effectivePrice === 1.69 && c.nameAz.includes('Super Paket'))).toBe(true);
+
+      // Run a price sync where Bazarstore drops Chicken Breast 1 kq price from 10.90 ₼ to 9.49 ₼,
+      // includes a duplicate entry in the same batch (which must be deduplicated),
+      // and includes an invalid 9999 ₼ anomaly (which must be rejected)
+      const syncRun = await db.runBazarstorePriceSync({
+        triggerType: 'MANUAL_API',
+        customItems: [
+          {
+            externalId: 'bz-prod-chicken-breast',
+            ean: '4760112233035',
+            title: 'Səba Toyuq döş əti (filesi) kq',
+            brand: 'Səba',
+            regularPrice: 11.9,
+            discountedPrice: 9.49,
+            isAvailable: true,
+            packageSize: 1000,
+            packageUnit: 'g',
+            canonicalIngredient: 'chicken_breast',
+          },
+          // Duplicate in same batch -> ignored
+          {
+            externalId: 'bz-prod-chicken-breast',
+            ean: '4760112233035',
+            title: 'Səba Toyuq döş əti (filesi) kq',
+            brand: 'Səba',
+            regularPrice: 11.9,
+            discountedPrice: 9.49,
+            isAvailable: true,
+            packageSize: 1000,
+            packageUnit: 'g',
+            canonicalIngredient: 'chicken_breast',
+          },
+          // Corrupted >5x spike on rice (from 3.99 ₼ to 85.00 ₼) -> rejected by anomaly guard
+          {
+            externalId: 'bz-prod-rice',
+            title: 'Besta Basmati Düyü 1 kq',
+            brand: 'Besta',
+            regularPrice: 85.0,
+            isAvailable: true,
+            packageSize: 1000,
+            packageUnit: 'g',
+            canonicalIngredient: 'rice',
+          },
+        ],
+      });
+
+      expect(syncRun.status).toBe('SUCCESS');
+      expect(syncRun.productsUpdated).toBe(1);
+      expect(syncRun.priceChangesRecorded).toBe(1);
+      expect(syncRun.errorsCount).toBe(1);
+      expect(syncRun.errorSummary).toContain('PRICE_ANOMALY_REJECTED');
+
+      // Verify shopping list immediately reflects the new 9.49 ₼ chicken breast price (and rice was NOT corrupted to 85 ₼)
+      const afterList = db.getShoppingList('user-farhad-1');
+      const chickenAfter = afterList.items.find((i) => i.canonicalIngredient === 'chicken_breast')!;
+      const riceAfter = afterList.items.find((i) => i.canonicalIngredient === 'rice')!;
+      expect(chickenAfter.unitPricePln).toBe(9.49);
+      expect(afterList.estimatedTotalPln).toBeLessThan(beforeList.estimatedTotalPln);
+      expect(riceAfter.unitPricePln).toBe(3.99);
+
+      // Verify historical price change was recorded
+      const history = db.getProductPriceHistory('chicken_breast', 'bazarstore');
+      expect(history.length).toBeGreaterThanOrEqual(2);
+      expect(history[0].effectivePrice).toBe(9.49);
+      expect(history[0].previousEffectivePrice).toBe(10.9);
+      expect(history[0].priceDelta).toBe(-1.41);
+    });
+
+    it('clearly identifies outdated prices (>48 hours old) and handles network failures safely without losing existing prices', async () => {
+      // Simulate a failed network fetch
+      const failedRun = await db.runBazarstorePriceSync({
+        triggerType: 'SCHEDULED_24H',
+        customFetch: async () => {
+          throw new Error('ECONNREFUSED bazarstore.az');
+        },
+      });
+      expect(failedRun.status).toBe('PARTIAL_FALLBACK');
+      expect(failedRun.errorsCount).toBeGreaterThan(0);
+
+      // Verify existing monitored products are preserved and not wiped
+      const productsNow = db.getMonitoredProducts('bazarstore');
+      expect(productsNow.length).toBeGreaterThanOrEqual(27);
+
+      // Simulate checking staleness 72 hours into the future without a successful sync
+      const futureMs = Date.now() + 72 * 3600 * 1000;
+      const summaryFuture = db.getPriceMonitoringSummary('bazarstore', futureMs);
+      expect(summaryFuture.isStale).toBe(true);
+      expect(summaryFuture.outdatedProductsCount).toBe(productsNow.length);
+
+      const staleCheck = computePriceStaleness(new Date().toISOString(), futureMs);
+      expect(staleCheck.isOutdated).toBe(true);
+      expect(staleCheck.priceAgeHours).toBeGreaterThanOrEqual(72);
     });
   });
 });

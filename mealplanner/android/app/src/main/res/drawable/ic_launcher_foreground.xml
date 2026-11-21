@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Chef Hat & Leaf Emblem -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28c-9.9,0 -18,8.1 -18,18c0,4.6 1.8,8.8 4.7,12V72c0,2.2 1.8,4 4,4h18.6c2.2,0 4,-1.8 4,-4V58c2.9,-3.2 4.7,-7.4 4.7,-12C72,36.1 63.9,28 54,28zM44,68v-6h20v6H44z" />
+    <path
+        android:fillColor="#86EFAC"
+        android:pathData="M54,36c4.4,0 8,3.6 8,8s-3.6,8 -8,8s-8,-3.6 -8,-8S49.6,36 54,36z" />
+</vector>

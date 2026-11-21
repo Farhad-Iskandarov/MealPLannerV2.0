@@ -49,6 +49,10 @@ import {
   getDefaultCurrencyForRegion,
   pickLocalizedList,
   pickLocalizedText,
+  localizeQuantityLabel,
+  formatMinutes,
+  formatItemsCount,
+  handleMealImageError,
 } from '../shared/regionConfig';
 import { formatPln, translations } from '../shared/i18n';
 import {
@@ -191,9 +195,65 @@ export const MealPlannerApp: React.FC = () => {
           data.recipes.find((r) => r.id === 'rec-grilled-chicken-rice') || data.recipes[0] || null;
         setSelectedRecipe(defaultRec);
         if (defaultRec) setRecipeServingsOverride(defaultRec.baseServings);
+
+        // Pre-warm image cache in idle time to eliminate image flash when switching tabs or recipes
+        if (typeof window !== 'undefined' && typeof Image !== 'undefined') {
+          const urls = new Set<string>();
+          for (const r of data.recipes) {
+            if (r.imageUrl) urls.add(r.imageUrl);
+          }
+          for (const o of data.promotionalOffers) {
+            if (o.imageUrl) urls.add(o.imageUrl);
+          }
+          const warmImages = () => {
+            urls.forEach((u) => {
+              const img = new Image();
+              img.decoding = 'async';
+              img.src = u;
+            });
+          };
+          if ('requestIdleCallback' in window) {
+            (window as any).requestIdleCallback(warmImages, { timeout: 1500 });
+          } else {
+            setTimeout(warmImages, 250);
+          }
+        }
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const currentLang: Language = state?.user.language || 'en';
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = currentLang;
+    }
+  }, [currentLang]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__handleAndroidBack = () => {
+        if (activeModal !== null) {
+          setActiveModal(null);
+          return true;
+        }
+        if (recipesViewMode === 'discovery' && activeTab === 'recipes') {
+          setRecipesViewMode('detail');
+          return true;
+        }
+        if (activeTab !== 'home') {
+          setActiveTab('home');
+          return true;
+        }
+        return false;
+      };
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as any).__handleAndroidBack;
+      }
+    };
+  }, [activeModal, activeTab, recipesViewMode]);
 
   if (loading || !state) {
     return (
@@ -270,6 +330,18 @@ export const MealPlannerApp: React.FC = () => {
   const handleCycleLanguage = async () => {
     const order: Language[] = ['en', 'pl', 'az'];
     const nextLang = order[(order.indexOf(lang) + 1) % order.length];
+    // Instant optimistic language switch for 0ms UI responsiveness
+    setState((prev) =>
+      prev
+        ? {
+            ...prev,
+            user: {
+              ...prev.user,
+              language: nextLang,
+            },
+          }
+        : prev
+    );
     const next = await clientApi.updatePreferences({ language: nextLang });
     setState(next);
     showToast(
@@ -308,6 +380,23 @@ export const MealPlannerApp: React.FC = () => {
 
   const handleToggleNotifications = async () => {
     const current = state.user.preferences.notifications.enabled;
+    setState((prev) =>
+      prev
+        ? {
+            ...prev,
+            user: {
+              ...prev.user,
+              preferences: {
+                ...prev.user.preferences,
+                notifications: {
+                  ...prev.user.preferences.notifications,
+                  enabled: !current,
+                },
+              },
+            },
+          }
+        : prev
+    );
     const next = await clientApi.updatePreferences({
       notifications: {
         ...state.user.preferences.notifications,
@@ -436,6 +525,9 @@ export const MealPlannerApp: React.FC = () => {
               className="mp-hero-basket-img"
               src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=300&q=80"
               alt="Fresh groceries basket"
+              decoding="async"
+              fetchPriority="high"
+              onError={handleMealImageError}
             />
           </div>
 
@@ -510,6 +602,9 @@ export const MealPlannerApp: React.FC = () => {
                   <img
                     className="mp-offer-img"
                     src={offer.imageUrl}
+                    loading="lazy"
+                    decoding="async"
+                    onError={handleMealImageError}
                     alt={pickLocalizedText(lang, {
                       en: offer.titleEn,
                       pl: offer.titlePl,
@@ -620,6 +715,7 @@ export const MealPlannerApp: React.FC = () => {
                   width: `${displayBudgetPct}%`,
                   height: '100%',
                   background: displayRemaining >= 0 ? '#2B8A44' : '#DC2626',
+                  transition: 'width 0.3s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.2s',
                 }}
               />
             </div>
@@ -743,7 +839,11 @@ export const MealPlannerApp: React.FC = () => {
             >
               <Sparkles size={12} />
               <span>
-                {state.weeklyPlan.planDurationDays || state.user.preferences.planDurationDays || 7}d AI Plan
+                {pickLocalizedText(lang, {
+                  en: `${state.weeklyPlan.planDurationDays || state.user.preferences.planDurationDays || 7}d AI Plan`,
+                  pl: `Plan AI (${state.weeklyPlan.planDurationDays || state.user.preferences.planDurationDays || 7} dni)`,
+                  az: `${state.weeklyPlan.planDurationDays || state.user.preferences.planDurationDays || 7} günlük AI Plan`,
+                })}
               </span>
             </button>
           </div>
@@ -788,7 +888,14 @@ export const MealPlannerApp: React.FC = () => {
               }}
               data-testid={`planned-meal-${meal.mealType}`}
             >
-              <img className="mp-meal-thumb" src={meal.recipe.imageUrl} alt={meal.recipe.titleEn} />
+              <img
+                className="mp-meal-thumb"
+                src={meal.recipe.imageUrl}
+                alt={meal.recipe.titleEn}
+                loading="lazy"
+                decoding="async"
+                onError={handleMealImageError}
+              />
               <div className="mp-meal-info">
                 <span className={`mp-meal-badge ${meal.mealType}`}>{t[meal.mealType]}</span>
                 <div className="mp-meal-title">
@@ -799,7 +906,7 @@ export const MealPlannerApp: React.FC = () => {
                   })}
                 </div>
                 <div className="mp-meal-meta">
-                  {meal.recipe.totalTimeMin} min • {meal.scaledCaloriesKcal} kcal • ~
+                  {formatMinutes(meal.recipe.totalTimeMin, lang)} • {meal.scaledCaloriesKcal} kcal • ~
                   {formatPln(meal.scaledCostPln, activeCurrency)}
                 </div>
               </div>
@@ -927,6 +1034,54 @@ export const MealPlannerApp: React.FC = () => {
             >
               {displayBudgetPct}%
             </div>
+          </div>
+
+          {/* AI Content Safety & Nutritional Disclaimer Strip (Google Play AI Policy) */}
+          <div
+            style={{
+              margin: '0 10px 8px',
+              padding: '6px 10px',
+              borderRadius: 10,
+              background: '#F4F8F4',
+              border: '1px solid #DCE5DD',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              fontSize: 10,
+              color: '#4B5563',
+            }}
+          >
+            <span>
+              {pickLocalizedText(lang, {
+                en: 'ℹ️ AI nutritional & price estimates are informational only. Always verify allergen labels.',
+                pl: 'ℹ️ Szacunki AI są wyłącznie informacyjne. Zawsze sprawdzaj alergeny na etykiecie.',
+                az: 'ℹ️ AI qida və qiymət təxminləri yalnız məlumat xarakterlidir. Allergen etiketlərini yoxlayın.',
+              })}
+            </span>
+            <button
+              onClick={() => setActiveModal('ai_report')}
+              data-testid="btn-report-ai-content"
+              style={{
+                border: '1px solid #DC2626',
+                background: '#FEF2F2',
+                color: '#991B1B',
+                borderRadius: 999,
+                padding: '2px 8px',
+                fontSize: 9.5,
+                fontWeight: 800,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              🚩{' '}
+              {pickLocalizedText(lang, {
+                en: 'Report AI',
+                pl: 'Zgłoś AI',
+                az: 'AI Şikayət',
+              })}
+            </button>
           </div>
         </div>
         {renderBottomNav('meal_plan')}
@@ -1104,7 +1259,14 @@ export const MealPlannerApp: React.FC = () => {
                       setRecipesViewMode('detail');
                     }}
                   >
-                    <img className="mp-meal-thumb" src={rec.imageUrl} alt={rec.titleEn} />
+                    <img
+                      className="mp-meal-thumb"
+                      src={rec.imageUrl}
+                      alt={rec.titleEn}
+                      loading="lazy"
+                      decoding="async"
+                      onError={handleMealImageError}
+                    />
                     <div className="mp-meal-info">
                       <span className={`mp-meal-badge ${rec.mealType}`}>{t[rec.mealType]}</span>
                       <div className="mp-meal-title">
@@ -1115,7 +1277,7 @@ export const MealPlannerApp: React.FC = () => {
                         })}
                       </div>
                       <div className="mp-meal-meta">
-                        {rec.totalTimeMin} min • {rec.nutrition.caloriesKcal} kcal • ~
+                        {formatMinutes(rec.totalTimeMin, lang)} • {rec.nutrition.caloriesKcal} kcal • ~
                         {formatPln(recCost, activeCurrency)}
                       </div>
                     </div>
@@ -1319,7 +1481,7 @@ export const MealPlannerApp: React.FC = () => {
                 {pickLocalizedText(lang, { en: 'Prep Time', pl: 'Przygotowanie', az: 'Hazırlıq' })}
               </div>
               <div style={{ fontWeight: 800, color: '#132A19' }} data-testid="recipe-prep-time">
-                {cookingMeta.prepTimeMin} min
+                {formatMinutes(cookingMeta.prepTimeMin, lang)}
               </div>
             </div>
             <div style={{ background: '#FFFFFF', padding: '5px 7px', borderRadius: 8 }}>
@@ -1327,13 +1489,13 @@ export const MealPlannerApp: React.FC = () => {
                 {pickLocalizedText(lang, { en: 'Cook Time', pl: 'Gotowanie', az: 'Bişirmə' })}
               </div>
               <div style={{ fontWeight: 800, color: '#132A19' }} data-testid="recipe-cook-time">
-                {cookingMeta.cookTimeMin} min
+                {formatMinutes(cookingMeta.cookTimeMin, lang)}
               </div>
             </div>
             <div style={{ background: '#FFFFFF', padding: '5px 7px', borderRadius: 8 }}>
               <div style={{ fontSize: 9.5, color: '#647067' }}>{t.totalTime}</div>
               <div style={{ fontWeight: 800, color: '#196431' }} data-testid="recipe-total-time">
-                {cookingMeta.totalTimeMin} min
+                {formatMinutes(cookingMeta.totalTimeMin, lang)}
               </div>
             </div>
           </div>
@@ -1582,6 +1744,47 @@ export const MealPlannerApp: React.FC = () => {
                 })}
           </span>
         </div>
+        <div
+          style={{
+            marginTop: 8,
+            paddingTop: 6,
+            borderTop: '1px dashed #E2EBE3',
+            fontSize: 10,
+            color: '#647067',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <span>
+            {pickLocalizedText(lang, {
+              en: 'Values are approximate estimates and not medical advice.',
+              pl: 'Wartości są orientacyjne i nie stanowią porady medycznej.',
+              az: 'Dəyərlər təxminidir və tibbi məsləhət deyil.',
+            })}
+          </span>
+          <button
+            onClick={() => setActiveModal('ai_report')}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: '#991B1B',
+              fontSize: 10,
+              fontWeight: 800,
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            {pickLocalizedText(lang, {
+              en: 'Report Recipe/AI',
+              pl: 'Zgłoś przepis/AI',
+              az: 'Resepti bildir',
+            })}
+          </button>
+        </div>
       </div>
     );
 
@@ -1591,12 +1794,23 @@ export const MealPlannerApp: React.FC = () => {
         <div className="mp-screen-scroll">
           {/* Hero Recipe Photo with Back, Favourite Heart, and Share/Discovery Toggle */}
           <div className="mp-recipe-hero-wrap">
-            <img className="mp-recipe-hero-img" src={activeRecipe.imageUrl} alt={activeRecipe.titleEn} />
+            <img
+              className="mp-recipe-hero-img"
+              src={activeRecipe.imageUrl}
+              alt={activeRecipe.titleEn}
+              decoding="async"
+              fetchPriority="high"
+              onError={handleMealImageError}
+            />
             <div className="mp-recipe-hero-overlay">
               <button
                 className="mp-circle-glass-btn"
                 onClick={() => setRecipesViewMode('discovery')}
-                title="Browse all recipes"
+                title={pickLocalizedText(lang, {
+                  en: 'Browse all recipes',
+                  pl: 'Przeglądaj wszystkie przepisy',
+                  az: 'Bütün reseptlərə bax',
+                })}
                 data-testid="btn-browse-all-recipes"
               >
                 <ArrowLeft size={16} color="#1B241E" />
@@ -1605,6 +1819,20 @@ export const MealPlannerApp: React.FC = () => {
                 <button
                   className="mp-circle-glass-btn"
                   onClick={async () => {
+                    const nextFav = !activeRecipe.isFavourite;
+                    setSelectedRecipe((prev) =>
+                      prev && prev.id === activeRecipe.id ? { ...prev, isFavourite: nextFav } : prev
+                    );
+                    setState((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            recipes: prev.recipes.map((r) =>
+                              r.id === activeRecipe.id ? { ...r, isFavourite: nextFav } : r
+                            ),
+                          }
+                        : prev
+                    );
                     const next = await clientApi.toggleFavouriteRecipe(activeRecipe.id);
                     setState(next);
                     const updated = next.recipes.find((r) => r.id === activeRecipe.id);
@@ -1621,7 +1849,11 @@ export const MealPlannerApp: React.FC = () => {
                 <button
                   className="mp-circle-glass-btn"
                   onClick={() => setRecipesViewMode('discovery')}
-                  title="Search recipes"
+                  title={pickLocalizedText(lang, {
+                    en: 'Search recipes',
+                    pl: 'Szukaj przepisów',
+                    az: 'Resept axtar',
+                  })}
                 >
                   <Share2 size={15} color="#1B241E" />
                 </button>
@@ -1630,14 +1862,14 @@ export const MealPlannerApp: React.FC = () => {
           </div>
 
           {/* Recipe Title & Description */}
-          <h2 style={{ fontSize: 17, fontWeight: 800, color: '#1B241E', lineHeight: 1.25 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 800, color: '#1B241E', lineHeight: 1.28 }}>
             {pickLocalizedText(lang, {
               en: activeRecipe.titleEn,
               pl: activeRecipe.titlePl,
               az: activeRecipe.titleAz,
             })}
           </h2>
-          <div style={{ fontSize: 11.5, color: '#4B5563', marginTop: 3, marginBottom: 4 }}>
+          <div style={{ fontSize: 11.5, color: '#4B5563', marginTop: 3, marginBottom: 4, lineHeight: 1.4 }}>
             {pickLocalizedText(lang, {
               en: activeRecipe.descriptionEn,
               pl: activeRecipe.descriptionPl,
@@ -1649,7 +1881,7 @@ export const MealPlannerApp: React.FC = () => {
           <div className="mp-metrics-strip">
             <div>
               <Clock size={14} color="#2B8A44" style={{ marginBottom: 2 }} />
-              <div className="mp-metric-val">{activeRecipe.totalTimeMin} min</div>
+              <div className="mp-metric-val">{formatMinutes(activeRecipe.totalTimeMin, lang)}</div>
               <div className="mp-metric-lbl">
                 {activeRecipe.prepTimeMin}m + {activeRecipe.cookTimeMin}m
               </div>
@@ -1892,7 +2124,11 @@ export const MealPlannerApp: React.FC = () => {
                 activeCatalogueStores[0];
               handleSelectSupermarket(nextStore);
             }}
-            title="Click to switch between local supermarkets"
+            title={pickLocalizedText(lang, {
+              en: 'Click to switch between local supermarkets',
+              pl: 'Kliknij, aby przełączyć supermarket',
+              az: 'Yerli supermarketi dəyişmək üçün toxunun',
+            })}
             data-testid="shopping-store-switcher"
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -1901,6 +2137,92 @@ export const MealPlannerApp: React.FC = () => {
             </div>
             <ChevronDown size={17} color="#647067" />
           </div>
+
+          {/* Automated 24h Price Monitoring & Freshness Status Bar */}
+          {(() => {
+            const monitor = state.priceMonitoring;
+            const outdatedCount = allItems.filter((i) => i.isOutdated).length;
+            const lastSyncLabel = monitor?.lastSuccessfulSyncAt
+              ? monitor.lastSuccessfulSyncAt.slice(0, 16).replace('T', ' ')
+              : state.shoppingList.updatedAt.slice(0, 16).replace('T', ' ');
+            return (
+              <div
+                data-testid="shopping-price-monitor-bar"
+                style={{
+                  background: outdatedCount > 0 ? '#FFFBEB' : '#F2F9F4',
+                  border: `1px solid ${outdatedCount > 0 ? '#FDE68A' : '#CBE4D2'}`,
+                  borderRadius: 11,
+                  padding: '6px 9px',
+                  marginBottom: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 6,
+                  fontSize: 10,
+                  color: outdatedCount > 0 ? '#92400E' : '#164A26',
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 800 }}>
+                    {outdatedCount > 0
+                      ? pickLocalizedText(lang, {
+                          en: `⚠️ ${outdatedCount} outdated price(s) (>48h old)`,
+                          pl: `⚠️ ${outdatedCount} nieaktualnych cen (>48h)`,
+                          az: `⚠️ ${outdatedCount} köhnəlmiş qiymət (>48 saat)`,
+                        })
+                      : pickLocalizedText(lang, {
+                          en: '✓ 24h Price Monitor Active (Bazarstore & Regional)',
+                          pl: '✓ Monitoring cen 24h aktywny',
+                          az: '✓ 24s Qiymət Monitorinqi Aktivdir (Bazarstore)',
+                        })}
+                  </div>
+                  <div style={{ opacity: 0.88 }}>
+                    {pickLocalizedText(lang, {
+                      en: `Last price update: ${lastSyncLabel} UTC`,
+                      pl: `Ostatnia aktualizacja cen: ${lastSyncLabel} UTC`,
+                      az: `Son qiymət yenilənməsi: ${lastSyncLabel} UTC`,
+                    })}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  data-testid="btn-sync-bazarstore"
+                  onClick={async () => {
+                    const res = await clientApi.syncBazarstorePrices();
+                    setState(res.state);
+                    showToast(
+                      pickLocalizedText(lang, {
+                        en: 'Synced latest Bazarstore & regional prices!',
+                        pl: 'Zsynchronizowano najnowsze ceny Bazarstore!',
+                        az: 'Bazarstore qiymətləri yeniləndi!',
+                      })
+                    );
+                  }}
+                  style={{
+                    border: '1px solid #196431',
+                    background: '#FFFFFF',
+                    color: '#196431',
+                    borderRadius: 999,
+                    padding: '3px 8px',
+                    fontSize: 9.5,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    flexShrink: 0,
+                  }}
+                >
+                  <RefreshCw size={10} />
+                  {pickLocalizedText(lang, {
+                    en: 'Sync',
+                    pl: 'Odśwież',
+                    az: 'Yenilə',
+                  })}
+                </button>
+              </div>
+            );
+          })()}
 
           {/* Collapsible Category Sections */}
           {Array.from(grouped.entries()).map(([category, items]) => {
@@ -1924,7 +2246,7 @@ export const MealPlannerApp: React.FC = () => {
                     <span>{t.categoryNames[category] || category}</span>
                   </div>
                   <span style={{ fontSize: 11, color: '#647067', fontWeight: 600 }}>
-                    {items.length} {items.length === 1 ? 'item' : 'items'}
+                    {formatItemsCount(items.length, lang)}
                   </span>
                 </div>
 
@@ -1934,9 +2256,25 @@ export const MealPlannerApp: React.FC = () => {
                       key={item.id}
                       className="mp-shop-item-card"
                       onClick={async () => {
-                        const next = await clientApi.toggleShoppingItem(
-                          item.isManual ? item.id : item.canonicalIngredient
-                        );
+                        const targetKey = item.isManual ? item.id : item.canonicalIngredient;
+                        const nextPurchased = !item.isPurchased;
+                        setState((prev) => {
+                          if (!prev) return prev;
+                          const updatedItems = prev.shoppingList.items.map((it) =>
+                            it.id === item.id ? { ...it, isPurchased: nextPurchased } : it
+                          );
+                          const boughtCount = updatedItems.filter((it) => it.isPurchased).length;
+                          return {
+                            ...prev,
+                            shoppingList: {
+                              ...prev.shoppingList,
+                              items: updatedItems,
+                              boughtCount,
+                              toBuyCount: updatedItems.length - boughtCount,
+                            },
+                          };
+                        });
+                        const next = await clientApi.toggleShoppingItem(targetKey);
                         setState(next);
                       }}
                       data-testid={`shop-item-${item.canonicalIngredient}`}
@@ -1962,10 +2300,10 @@ export const MealPlannerApp: React.FC = () => {
                             })}
                           </div>
                           <div style={{ fontSize: 10.5, color: '#647067' }}>
-                            {item.packageSizeLabel}
+                            {localizeQuantityLabel(item.packageSizeLabel, lang)}
                             {item.leftoverAmount > 0 && (
                               <span style={{ color: '#2B8A44', marginLeft: 4 }}>
-                                (+{item.leftoverDisplayLabel}{' '}
+                                (+{localizeQuantityLabel(item.leftoverDisplayLabel, lang)}{' '}
                                 {pickLocalizedText(lang, {
                                   en: 'pantry',
                                   pl: 'spiżarnia',
@@ -1997,13 +2335,92 @@ export const MealPlannerApp: React.FC = () => {
                                   : 'Bonus'}
                               </span>
                             )}
+                            {item.isOutdated && (
+                              <span
+                                data-testid={`badge-outdated-${item.canonicalIngredient}`}
+                                style={{
+                                  marginLeft: 4,
+                                  fontSize: 9,
+                                  background: '#FEF3C7',
+                                  color: '#92400E',
+                                  padding: '1px 5px',
+                                  borderRadius: 4,
+                                  fontWeight: 800,
+                                }}
+                              >
+                                ⚠️{' '}
+                                {pickLocalizedText(lang, {
+                                  en: 'Outdated price',
+                                  pl: 'Cena nieaktualna',
+                                  az: 'Köhnəlmiş qiymət',
+                                })}
+                              </span>
+                            )}
+                            {item.isAvailable === false && (
+                              <span
+                                data-testid={`badge-unavailable-${item.canonicalIngredient}`}
+                                style={{
+                                  marginLeft: 4,
+                                  fontSize: 9,
+                                  background: '#FEE2E2',
+                                  color: '#991B1B',
+                                  padding: '1px 5px',
+                                  borderRadius: 4,
+                                  fontWeight: 800,
+                                }}
+                              >
+                                🚫{' '}
+                                {pickLocalizedText(lang, {
+                                  en: 'Out of stock',
+                                  pl: 'Brak w sklepie',
+                                  az: 'Stokda yoxdur',
+                                })}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: 13, fontWeight: 900, color: '#1B241E' }}>
-                            {formatPln(item.lineTotalPln, activeCurrency)}
+                          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 4 }}>
+                            {item.regularLineTotalPln > item.lineTotalPln + 0.005 && (
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  fontWeight: 800,
+                                  background: '#FACC15',
+                                  color: '#1B241E',
+                                  padding: '1px 4px',
+                                  borderRadius: 999,
+                                }}
+                              >
+                                -{Math.round(((item.regularLineTotalPln - item.lineTotalPln) / item.regularLineTotalPln) * 100)}%
+                              </span>
+                            )}
+                            <span
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 900,
+                                color:
+                                  item.regularLineTotalPln > item.lineTotalPln + 0.005
+                                    ? '#DC2626'
+                                    : '#1B241E',
+                              }}
+                            >
+                              {formatPln(item.lineTotalPln, activeCurrency)}
+                            </span>
+                            {item.regularLineTotalPln > item.lineTotalPln + 0.005 && (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  color: '#9CA3AF',
+                                  textDecoration: 'line-through',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {formatPln(item.regularLineTotalPln, activeCurrency)}
+                              </span>
+                            )}
                           </div>
                           <div style={{ fontSize: 9.5, color: '#647067' }}>{item.unitPriceLabel}</div>
                         </div>
@@ -2113,6 +2530,7 @@ export const MealPlannerApp: React.FC = () => {
               className="mp-profile-avatar"
               src={state.user.avatarUrl}
               alt={state.user.displayName}
+              onError={handleMealImageError}
             />
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 15, fontWeight: 800, color: '#1B241E' }}>
@@ -2307,7 +2725,7 @@ export const MealPlannerApp: React.FC = () => {
             </div>
 
             {/* 10. Privacy & Terms */}
-            <div className="mp-setting-row" onClick={() => setActiveModal('privacy')}>
+            <div className="mp-setting-row" onClick={() => setActiveModal('privacy')} data-testid="setting-privacy">
               <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
                 <div className="mp-setting-icon">
                   <ShieldAlert size={17} />
@@ -2325,6 +2743,62 @@ export const MealPlannerApp: React.FC = () => {
               </div>
               <ChevronRight size={17} color="#647067" />
             </div>
+
+            {/* 11. Report AI Content / Safety Feedback (Google Play AI Policy) */}
+            <div
+              className="mp-setting-row"
+              onClick={() => setActiveModal('ai_report')}
+              data-testid="setting-ai-report"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                <div className="mp-setting-icon" style={{ background: '#FEF3C7', color: '#B45309' }}>
+                  <Sparkles size={17} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800 }}>
+                    {pickLocalizedText(lang, {
+                      en: 'Report AI Content',
+                      pl: 'Zgłoś treść AI',
+                      az: 'AI məzmununu bildir',
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#647067' }}>
+                    {pickLocalizedText(lang, {
+                      en: 'Flag inaccurate allergen, nutrition or recipe data',
+                      pl: 'Zgłoś błędne alergeny, wartości odżywcze lub przepis',
+                      az: 'Yanlış allergen, qida dəyəri və ya resepti bildir',
+                    })}
+                  </div>
+                </div>
+              </div>
+              <ChevronRight size={17} color="#647067" />
+            </div>
+
+            {/* 12. Delete Account & Personal Data (Google Play User Data Policy) */}
+            <div
+              className="mp-setting-row"
+              onClick={() => setActiveModal('auth')}
+              data-testid="setting-delete-account"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                <div className="mp-setting-icon" style={{ background: '#FEE2E2', color: '#DC2626' }}>
+                  <Trash2 size={17} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#991B1B' }}>
+                    {t.deleteAccount}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#647067' }}>
+                    {pickLocalizedText(lang, {
+                      en: 'Permanently erase account & all stored data',
+                      pl: 'Trwale usuń konto i wszystkie zapisane dane',
+                      az: 'Hesabı və bütün saxlanılan məlumatları həmişəlik sil',
+                    })}
+                  </div>
+                </div>
+              </div>
+              <ChevronRight size={17} color="#991B1B" />
+            </div>
           </div>
         </div>
         {renderBottomNav('profile')}
@@ -2333,7 +2807,7 @@ export const MealPlannerApp: React.FC = () => {
   };
 
   return (
-    <div>
+    <div lang={lang}>
       {/* === Top Showcase Header Banner === */}
       <header className="mp-top-showcase-header">
         <div className="mp-brand-cluster">
@@ -2396,7 +2870,11 @@ export const MealPlannerApp: React.FC = () => {
             data-testid="btn-mode-showcase"
           >
             <LayoutGrid size={14} />
-            5-Screen View
+            {pickLocalizedText(lang, {
+              en: '5-Screen View',
+              pl: 'Widok 5 ekranów',
+              az: '5 Ekran Görünüşü',
+            })}
           </button>
           <button
             className={`mp-mode-btn ${viewMode === 'single_phone' ? 'active' : ''}`}
@@ -2404,7 +2882,11 @@ export const MealPlannerApp: React.FC = () => {
             data-testid="btn-mode-single"
           >
             <Smartphone size={14} />
-            Android Phone
+            {pickLocalizedText(lang, {
+              en: 'Android Phone',
+              pl: 'Telefon Android',
+              az: 'Android Telefon',
+            })}
           </button>
         </div>
       </header>
@@ -2425,13 +2907,14 @@ export const MealPlannerApp: React.FC = () => {
             fontWeight: 700,
             zIndex: 2000,
             boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+            animation: 'mpToastSlideUp 0.18s cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
           {toastMsg}
         </div>
       )}
 
-      {/* === Main Stage: Either 5-Phone Showcase (exact reference image layout) or Single Android Phone === */}
+      {/* === Main Stage: Either 5-Phone Showcase (exact reference image layout) or Single Android Phone (Preserved DOM State) === */}
       {viewMode === 'showcase_5' ? (
         <main className="mp-phones-stage five-phone-grid">
           {renderHomeScreen()}
@@ -2442,11 +2925,21 @@ export const MealPlannerApp: React.FC = () => {
         </main>
       ) : (
         <main className="mp-phones-stage">
-          {activeTab === 'home' && renderHomeScreen()}
-          {activeTab === 'meal_plan' && renderMealPlanScreen()}
-          {activeTab === 'recipes' && renderRecipeScreen()}
-          {activeTab === 'shopping' && renderShoppingListScreen()}
-          {activeTab === 'profile' && renderProfileScreen()}
+          <div className={`mp-screen-slot ${activeTab === 'home' ? 'active' : 'hidden'}`}>
+            {renderHomeScreen()}
+          </div>
+          <div className={`mp-screen-slot ${activeTab === 'meal_plan' ? 'active' : 'hidden'}`}>
+            {renderMealPlanScreen()}
+          </div>
+          <div className={`mp-screen-slot ${activeTab === 'recipes' ? 'active' : 'hidden'}`}>
+            {renderRecipeScreen()}
+          </div>
+          <div className={`mp-screen-slot ${activeTab === 'shopping' ? 'active' : 'hidden'}`}>
+            {renderShoppingListScreen()}
+          </div>
+          <div className={`mp-screen-slot ${activeTab === 'profile' ? 'active' : 'hidden'}`}>
+            {renderProfileScreen()}
+          </div>
         </main>
       )}
 
@@ -2553,6 +3046,17 @@ export const MealPlannerApp: React.FC = () => {
           );
         }}
         onSelectSupermarket={handleSelectSupermarket}
+        onSyncPrices={async () => {
+          const res = await clientApi.syncBazarstorePrices();
+          setState(res.state);
+          showToast(
+            pickLocalizedText(lang, {
+              en: 'Checked Bazarstore catalogue & refreshed shopping basket prices!',
+              pl: 'Sprawdzono katalog Bazarstore i odświeżono ceny koszyka!',
+              az: 'Bazarstore kataloqu yoxlanıldı və səbət qiymətləri yeniləndi!',
+            })
+          );
+        }}
         onLogin={async (email, password) => {
           const next = await clientApi.login(email, password);
           setState(next);
@@ -2593,6 +3097,48 @@ export const MealPlannerApp: React.FC = () => {
               en: 'Logged out',
               pl: 'Wylogowano z sesji',
               az: 'Hesabdan çıxış edildi',
+            })
+          );
+        }}
+        onDeleteAccount={async () => {
+          const res = await clientApi.deleteAccount();
+          setState(res.state);
+          showToast(
+            pickLocalizedText(lang, {
+              en: 'Account & all associated personal data permanently deleted.',
+              pl: 'Konto i wszystkie powiązane dane osobowe zostały trwale usunięte.',
+              az: 'Hesab və bütün əlaqəli şəxsi məlumatlar həmişəlik silindi.',
+            })
+          );
+        }}
+        onReportAiContent={async (payload) => {
+          await clientApi.reportAiContent(payload);
+          showToast(
+            pickLocalizedText(lang, {
+              en: 'Thank you! AI content report submitted for review.',
+              pl: 'Dziękujemy! Zgłoszenie treści AI zostało wysłane.',
+              az: 'Təşəkkür edirik! AI məzmun şikayəti göndərildi.',
+            })
+          );
+        }}
+        onExportUserData={async () => {
+          const data = await clientApi.exportUserData();
+          if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `mealplanner-gdpr-export-${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }
+          showToast(
+            pickLocalizedText(lang, {
+              en: 'Exported personal data (JSON).',
+              pl: 'Wyeksportowano dane osobowe (JSON).',
+              az: 'Şəxsi məlumatlar ixrac edildi (JSON).',
             })
           );
         }}

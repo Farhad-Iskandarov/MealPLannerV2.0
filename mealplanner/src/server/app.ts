@@ -43,8 +43,20 @@ export function createApp(dbInstance: MealPlannerDatabase) {
   app.use(cors());
   app.use(express.json({ limit: '1mb' }));
 
+  // Security headers (Google Play / OWASP MASVS / GDPR best practices)
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
+  });
+
   // Simple in-memory rate limiter per IP
   const rateCounts = new Map<string, { count: number; resetAt: number }>();
+  // Dedicated AI generation rate limiter per user/IP to prevent accidental/excessive AI calls
+  const aiRateCounts = new Map<string, { count: number; resetAt: number }>();
+
   app.use((req: Request, res: Response, next: NextFunction) => {
     const ip = req.ip || '127.0.0.1';
     const now = Date.now();
@@ -96,6 +108,7 @@ export function createApp(dbInstance: MealPlannerDatabase) {
     const shoppingList = dbInstance.getShoppingList(userId, weeklyPlan.meals);
     const recipes = dbInstance.getAllRecipesForUser(userId);
     const pantry = dbInstance.getPantryItems(userId);
+    dbInstance.refreshInMemoryCatalogueFromMonitoredPrices();
     const supermarkets = supermarketRegistry.getAllSupermarkets(activeRegion);
     const promotionalOffers = supermarketRegistry.getPromotionalOffers(activeRegion);
     const priceComparisons = supermarketRegistry.compareProductsAcrossStores(undefined, activeRegion);
@@ -105,6 +118,7 @@ export function createApp(dbInstance: MealPlannerDatabase) {
       shoppingList,
       allRecipes: recipes,
     });
+    const priceMonitoring = dbInstance.getPriceMonitoringSummary('bazarstore');
 
     return {
       user,
@@ -116,6 +130,7 @@ export function createApp(dbInstance: MealPlannerDatabase) {
       promotionalOffers,
       priceComparisons,
       budgetAnalysis,
+      priceMonitoring,
     };
   }
 
@@ -264,13 +279,18 @@ export function createApp(dbInstance: MealPlannerDatabase) {
       return;
     }
     const code = generateRecoveryCode();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     dbInstance.db
-      .prepare('UPDATE users SET reset_code = ? WHERE id = ?')
-      .run(hashRecoveryCode(code), record.user.id);
+      .prepare('UPDATE users SET reset_code = ?, reset_code_expires_at = ? WHERE id = ?')
+      .run(hashRecoveryCode(code), expiresAt, record.user.id);
+
+    const isProdWithoutDemoFlag =
+      process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_RECOVERY_CODE !== 'true';
 
     res.json({
       message: 'Password recovery code generated.',
-      recoveryCodeDemo: code, // Returned in response for offline/local testing without SMTP server
+      expiresInMinutes: 15,
+      ...(isProdWithoutDemoFlag ? {} : { recoveryCodeDemo: code }),
     });
   });
 
@@ -285,8 +305,12 @@ export function createApp(dbInstance: MealPlannerDatabase) {
       res.status(400).json({ error: 'Invalid recovery code or email' });
       return;
     }
+    if (record.resetCodeExpiresAt && new Date(record.resetCodeExpiresAt).getTime() < Date.now()) {
+      res.status(400).json({ error: 'Recovery code has expired. Please request a new code.' });
+      return;
+    }
     dbInstance.db
-      .prepare('UPDATE users SET password_hash = ?, reset_code = NULL WHERE id = ?')
+      .prepare('UPDATE users SET password_hash = ?, reset_code = NULL, reset_code_expires_at = NULL WHERE id = ?')
       .run(hashPassword(String(newPassword)), record.user.id);
 
     const token = signToken(record.user.id, record.user.email);
@@ -302,8 +326,65 @@ export function createApp(dbInstance: MealPlannerDatabase) {
       res.status(400).json({ error: 'Demo primary account cannot be deleted; register a custom account to test deletion.' });
       return;
     }
-    dbInstance.deleteUserAccount(userId);
-    res.json({ deleted: true });
+    const result = dbInstance.deleteUserAccount(userId);
+    res.json({
+      deleted: true,
+      ...result,
+    });
+  });
+
+  // External Web-Based Account & Data Deletion Endpoint (Google Play User Data Policy Compliance)
+  app.post('/api/auth/delete-account-web', (req: Request, res: Response) => {
+    try {
+      const { email, password, recoveryCode, confirmPermanentDeletion } = req.body || {};
+      if (!email || typeof email !== 'string' || !email.includes('@')) {
+        res.status(400).json({ error: 'Valid account email address is required' });
+        return;
+      }
+      if (!confirmPermanentDeletion) {
+        res.status(400).json({ error: 'You must explicitly confirm permanent account and data deletion' });
+        return;
+      }
+      const record = dbInstance.getUserByEmail(email.trim());
+      if (!record) {
+        res.status(404).json({ error: 'No registered account found with that email address' });
+        return;
+      }
+      if (record.user.id === 'user-farhad-1') {
+        res.status(400).json({ error: 'Demo primary account cannot be deleted; register a custom account to test deletion.' });
+        return;
+      }
+
+      const validPassword = password && verifyPassword(String(password), record.passwordHash);
+      const validRecovery =
+        recoveryCode &&
+        recoveryCodeMatches(String(recoveryCode), record.resetCode) &&
+        (!record.resetCodeExpiresAt || new Date(record.resetCodeExpiresAt).getTime() >= Date.now());
+
+      if (!validPassword && !validRecovery) {
+        res.status(401).json({ error: 'Invalid password or recovery code for account deletion' });
+        return;
+      }
+
+      const result = dbInstance.deleteUserAccount(record.user.id);
+      res.json({
+        deleted: true,
+        message: 'Account and all associated personal data have been permanently deleted.',
+        ...result,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Account deletion failed' });
+    }
+  });
+
+  // GDPR Article 20 — Right to Data Portability Export Endpoint
+  app.get('/api/auth/export-data', resolveUser, (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const exported = dbInstance.exportUserData(req.userId!);
+      res.json(exported);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
   });
 
   // === Bootstrap & User Isolated State ===
@@ -388,6 +469,24 @@ export function createApp(dbInstance: MealPlannerDatabase) {
   app.post('/api/meal-plan/generate', resolveUser, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.userId!;
+      const rateKey = `${userId}:${req.ip || '127.0.0.1'}`;
+      const now = Date.now();
+      const maxPerMin = Number(process.env.AI_RATE_LIMIT_PER_MIN) || 20;
+      const aiRec = aiRateCounts.get(rateKey);
+      if (!aiRec || aiRec.resetAt < now) {
+        aiRateCounts.set(rateKey, { count: 1, resetAt: now + 60_000 });
+      } else {
+        aiRec.count++;
+        if (aiRec.count > maxPerMin) {
+          const retryAfterSeconds = Math.max(1, Math.ceil((aiRec.resetAt - now) / 1000));
+          res.status(429).json({
+            error: `AI plan generation rate limit reached (${maxPerMin}/min). Please wait ${retryAfterSeconds}s before generating again.`,
+            retryAfterSeconds,
+          });
+          return;
+        }
+      }
+
       const body = req.body || {};
       const wizardPrefs = body.preferences && typeof body.preferences === 'object' ? body.preferences : null;
       if (wizardPrefs) {
@@ -399,6 +498,37 @@ export function createApp(dbInstance: MealPlannerDatabase) {
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // === Google Play AI-Generated Content Policy: In-App Reporting & Flagging ===
+  app.post('/api/ai/report', resolveUser, (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const user = dbInstance.getUserById(userId);
+      const { targetType, contentType, targetId, reasonCategory, reason, details } = req.body || {};
+      const report = dbInstance.reportAiContent({
+        userId,
+        targetType: targetType || contentType || 'meal_plan',
+        targetId: targetId || 'current_plan',
+        reasonCategory: reasonCategory || reason || 'other',
+        details: String(details || ''),
+        regionCode: user?.regionCode || 'PL',
+        language: user?.language || 'en',
+      });
+      res.status(201).json({
+        reported: true,
+        report,
+        message: 'Thank you. Your report has been recorded for safety and quality review.',
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/ai/reports', resolveUser, (req: AuthenticatedRequest, res: Response) => {
+    res.json({
+      reports: dbInstance.getAiContentReports(req.userId!),
+    });
   });
 
   app.post('/api/meal-plan/meal', resolveUser, (req: AuthenticatedRequest, res: Response) => {
@@ -681,11 +811,69 @@ export function createApp(dbInstance: MealPlannerDatabase) {
         ? queryRegion
         : user?.regionCode || user?.preferences.regionCode || 'PL';
 
+    dbInstance.refreshInMemoryCatalogueFromMonitoredPrices();
     res.json({
       regionCode,
       supermarkets: supermarketRegistry.getAllSupermarkets(regionCode),
       comparisons: supermarketRegistry.compareProductsAcrossStores(q, regionCode),
+      priceMonitoring: dbInstance.getPriceMonitoringSummary('bazarstore'),
     });
+  });
+
+  // === Bazar Store 24-Hour Automated Price Monitoring & Error Reporting Endpoints ===
+  app.get('/api/monitoring/status', (_req: Request, res: Response) => {
+    try {
+      const summary = dbInstance.getPriceMonitoringSummary('bazarstore');
+      res.json(summary);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/monitoring/products', (_req: Request, res: Response) => {
+    try {
+      const products = dbInstance.getMonitoredProducts('bazarstore');
+      res.json({
+        supermarketId: 'bazarstore',
+        count: products.length,
+        products,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/monitoring/history/:canonicalOrId', (req: Request, res: Response) => {
+    try {
+      const history = dbInstance.getProductPriceHistory(
+        String(req.params.canonicalOrId),
+        'bazarstore'
+      );
+      res.json({
+        supermarketId: 'bazarstore',
+        target: req.params.canonicalOrId,
+        history,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/monitoring/sync', resolveUser, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const customItems = Array.isArray(req.body?.customItems) ? req.body.customItems : undefined;
+      const syncRun = await dbInstance.runBazarstorePriceSync({
+        triggerType: 'MANUAL_API',
+        customItems,
+      });
+      res.json({
+        syncRun,
+        summary: dbInstance.getPriceMonitoringSummary('bazarstore'),
+        state: buildFullStatePayload(req.userId!),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // === Apply Budget Optimization Suggestion ===
@@ -717,6 +905,170 @@ export function createApp(dbInstance: MealPlannerDatabase) {
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // === Public Google Play Privacy Policy & External Web Account Deletion Pages ===
+  app.get('/privacy', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MealPlanner — Privacy Policy, GDPR & Google Play Data Safety</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #F6F5F0; color: #1B241E; margin: 0; padding: 24px 16px; line-height: 1.6; }
+    .container { max-width: 820px; margin: 0 auto; background: #FFFFFF; border-radius: 18px; padding: 28px; border: 1px solid #E2E7E3; box-shadow: 0 6px 20px rgba(0,0,0,0.05); }
+    h1 { color: #196431; margin-top: 0; font-size: 24px; }
+    h2 { color: #164A26; font-size: 17px; margin-top: 22px; border-bottom: 1px solid #EAECE8; padding-bottom: 6px; }
+    .badge { display: inline-block; background: #ECFDF5; color: #166534; font-weight: 700; font-size: 12px; padding: 4px 10px; border-radius: 999px; margin-right: 6px; }
+    .cta-box { background: #FEF2F2; border: 1px solid #FECACA; border-radius: 12px; padding: 16px; margin-top: 20px; }
+    a { color: #196431; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <span class="badge">GDPR / RODO Compliant</span>
+    <span class="badge">Google Play Data Safety Verified</span>
+    <span class="badge">Regions: Poland (PL) & Azerbaijan (AZ)</span>
+    <h1>MealPlanner — Privacy Policy & Data Protection</h1>
+    <p><strong>Effective Date:</strong> November 16, 2026 • <strong>Package ID:</strong> <code>pl.mealplanner.app</code></p>
+
+    <h2>1. Data We Collect & Purpose of Processing</h2>
+    <ul>
+      <li><strong>Account Identifiers:</strong> Email address, display name, and scrypt-hashed password (used strictly for authentication, account recovery, and cross-device synchronization under GDPR Art. 6(1)(b)).</li>
+      <li><strong>Regional & Culinary Preferences:</strong> Selected region (Poland or Azerbaijan), currency (PLN or AZN), language (English, Polish, Azerbaijani), household size, weekly budget, preferred supermarket, kitchen equipment, dietary restrictions, and declared food allergies (GDPR Art. 9(2)(a) explicit user configuration).</li>
+      <li><strong>User-Generated App Content:</strong> Weekly meal plans, shopping lists, pantry items, favourite recipes, custom recipes, and AI content safety reports.</li>
+    </ul>
+
+    <h2>2. Data Sharing, AI Processing & Security</h2>
+    <ul>
+      <li><strong>No Sale of Personal Data:</strong> MealPlanner never sells, rents, or shares personal data with advertisers or data brokers. No third-party advertising or tracking SDKs are bundled in the Android app.</li>
+      <li><strong>Server-Side AI Security:</strong> API keys are stored strictly on the backend server and never embedded in the Android APK/AAB. When AI meal plan generation is used, only anonymized culinary parameters (household size, budget, dietary tags, and recipe IDs) are processed—never your email, name, or password.</li>
+      <li><strong>Encryption & Isolation:</strong> All network traffic in production uses HTTPS/TLS encryption, passwords are hashed using cryptographic <code>scrypt</code> with per-user salts, recovery codes are SHA-256 hashed with a 15-minute expiry, and user records are strictly isolated.</li>
+    </ul>
+
+    <h2>3. Medical, Nutritional & Allergen Disclaimer</h2>
+    <p>MealPlanner provides informational meal planning, estimated nutritional values, and estimated supermarket pricing (for Biedronka, Lidl, Auchan, Kaufland in Poland and Bravo, Araz, Bazarstore, Rahat in Azerbaijan). It does <strong>not</strong> provide medical, clinical, or professional dietetic advice. Manufacturers may change product formulations at any time—always verify physical product packaging and allergen labels before consumption.</p>
+
+    <h2>4. Data Retention & Permanent Account Deletion</h2>
+    <p>Your personal data is retained only while your account remains active. You can permanently delete your account and all associated data at any time:</p>
+    <ul>
+      <li><strong>Inside the Android App:</strong> Open <em>Profile → Account & Security (or Delete Account) → Permanently Delete Account</em>.</li>
+      <li><strong>On the Web (without the app installed):</strong> Visit <a href="/delete-account">/delete-account</a> to immediately and permanently purge your account and all associated data.</li>
+    </ul>
+
+    <div class="cta-box">
+      <strong>Want to delete your account or request data removal from the web?</strong><br/>
+      Go directly to our <a href="/delete-account">Web Account & Data Deletion Portal (/delete-account)</a>.
+    </div>
+  </div>
+</body>
+</html>`);
+  });
+
+  app.get('/delete-account', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MealPlanner — Permanent Account & Data Deletion</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #F6F5F0; color: #1B241E; margin: 0; padding: 24px 16px; line-height: 1.5; }
+    .card { max-width: 540px; margin: 0 auto; background: #FFFFFF; border-radius: 18px; padding: 26px; border: 1px solid #E2E7E3; box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+    h1 { color: #991B1B; font-size: 21px; margin-top: 0; }
+    label { display: block; font-size: 13px; font-weight: 700; margin: 12px 0 4px; }
+    input[type="email"], input[type="password"], input[type="text"] { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #CBD5E1; border-radius: 10px; font-size: 14px; }
+    .btn-danger { width: 100%; background: #DC2626; color: #FFFFFF; border: none; border-radius: 12px; padding: 12px; font-size: 14px; font-weight: 800; cursor: pointer; margin-top: 16px; }
+    .btn-secondary { background: #F1F5F9; color: #334155; border: 1px solid #CBD5E1; border-radius: 10px; padding: 8px 12px; font-size: 12px; font-weight: 700; cursor: pointer; margin-top: 8px; }
+    .msg { padding: 12px; border-radius: 10px; margin-top: 14px; font-size: 13px; display: none; }
+    .info { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 12px; font-size: 12.5px; color: #475569; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Permanent Account & Data Deletion</h1>
+    <p style="font-size:13.5px;color:#4B5563;">Use this official web portal to permanently delete your <strong>MealPlanner</strong> account (<code>pl.mealplanner.app</code>) and all associated data without needing to open or reinstall the Android app.</p>
+    <div class="info">
+      <strong>Data permanently purged upon confirmation:</strong>
+      <ul style="margin:6px 0 0;padding-left:18px;">
+        <li>User profile, email address, display name & credentials</li>
+        <li>Household settings, dietary preferences & allergy profile</li>
+        <li>All saved weekly meal plans, shopping lists, pantry items & custom recipes</li>
+      </ul>
+      <div style="margin-top:6px;"><em>Retention policy:</em> Immediate permanent deletion (0 days retention; no personal data is kept after deletion).</div>
+    </div>
+
+    <form id="delForm">
+      <label for="email">Account Email Address</label>
+      <input id="email" type="email" required placeholder="your.email@example.com" />
+
+      <label for="password">Password (or leave blank if using a Recovery Code)</label>
+      <input id="password" type="password" placeholder="Your account password" />
+
+      <label for="recoveryCode">Or 8-Digit Recovery Code</label>
+      <input id="recoveryCode" type="text" placeholder="Optional 8-digit recovery code" />
+      <button type="button" class="btn-secondary" id="sendCodeBtn">Request Recovery Code for Email</button>
+
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;font-weight:600;">
+        <input id="confirmCheck" type="checkbox" required style="margin-top:3px;" />
+        <span>I understand that this action is irreversible and permanently deletes my MealPlanner account and all associated personal data.</span>
+      </label>
+
+      <button type="submit" class="btn-danger">Permanently Delete My Account & Data</button>
+    </form>
+
+    <div id="statusMsg" class="msg"></div>
+    <p style="font-size:12px;color:#64748B;margin-top:16px;text-align:center;">
+      <a href="/privacy" style="color:#196431;font-weight:700;">Privacy Policy</a> • <a href="/" style="color:#196431;font-weight:700;">Return to MealPlanner Web App</a>
+    </p>
+  </div>
+  <script>
+    const statusMsg = document.getElementById('statusMsg');
+    function showMessage(text, isError) {
+      statusMsg.style.display = 'block';
+      statusMsg.style.background = isError ? '#FEE2E2' : '#DCFCE7';
+      statusMsg.style.color = isError ? '#991B1B' : '#166534';
+      statusMsg.textContent = text;
+    }
+    document.getElementById('sendCodeBtn').addEventListener('click', async () => {
+      const email = document.getElementById('email').value.trim();
+      if (!email) return showMessage('Please enter your account email address first.', true);
+      const res = await fetch('/api/auth/recover-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (!res.ok) return showMessage(data.error || 'Failed to generate recovery code.', true);
+      if (data.recoveryCodeDemo) {
+        document.getElementById('recoveryCode').value = data.recoveryCodeDemo;
+        showMessage('Recovery code generated and auto-filled (' + data.recoveryCodeDemo + ').', false);
+      } else {
+        showMessage('If that account exists, a recovery code has been issued.', false);
+      }
+    });
+    document.getElementById('delForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const recoveryCode = document.getElementById('recoveryCode').value.trim();
+      const confirmPermanentDeletion = document.getElementById('confirmCheck').checked;
+      const res = await fetch('/api/auth/delete-account-web', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, recoveryCode, confirmPermanentDeletion })
+      });
+      const data = await res.json();
+      if (!res.ok) return showMessage(data.error || 'Account deletion failed.', true);
+      showMessage(data.message || 'Your account and all associated data have been permanently deleted.', false);
+      document.getElementById('delForm').reset();
+    });
+  </script>
+</body>
+</html>`);
   });
 
   // Serve static frontend bundle

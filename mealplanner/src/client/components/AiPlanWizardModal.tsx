@@ -36,6 +36,8 @@ import {
   pickLocalizedText,
   getDefaultCurrencyForRegion,
   resolveValidSupermarketForRegion,
+  toLocaleUpper,
+  formatMinutes,
 } from '../../shared/regionConfig';
 import { getCatalogueProductsForRegion } from '../../server/supermarkets/catalogueData';
 import { validateRecipeForUser } from '../../server/validation/mealValidator';
@@ -58,12 +60,12 @@ const DIETARY_OPTIONS: Array<{
 }> = [
   { key: 'vegan', icon: '🌱', label: { en: 'Vegan', pl: 'Wegańska', az: 'Veqan' } },
   { key: 'vegetarian', icon: '🥗', label: { en: 'Vegetarian', pl: 'Wegetariańska', az: 'Vegetarian' } },
-  { key: 'gluten_free', icon: '🌾', label: { en: 'Gluten-free', pl: 'Bezglutenowa', az: 'Qlütensiz' } },
+  { key: 'gluten_free', icon: '🌾', label: { en: 'Gluten-free', pl: 'Bezglutenowa', az: 'Qlutensiz' } },
   { key: 'lactose_free', icon: '🥛', label: { en: 'Lactose-free', pl: 'Bez laktozy', az: 'Laktozasız' } },
   { key: 'high_protein', icon: '💪', label: { en: 'High-protein', pl: 'Wysokobiałkowa', az: 'Yüksək zülallı' } },
   { key: 'keto', icon: '🥑', label: { en: 'Keto', pl: 'Keto', az: 'Keto' } },
   { key: 'low_carb', icon: '🥦', label: { en: 'Low-carb', pl: 'Niskowęglowodanowa', az: 'Az karbohidratlı' } },
-  { key: 'pescatarian', icon: '🐟', label: { en: 'Pescatarian', pl: 'Peszkatariańska', az: 'Pesketaryan' } },
+  { key: 'pescatarian', icon: '🐟', label: { en: 'Pescatarian', pl: 'Peskowegetariańska', az: 'Peskovegetarian' } },
 ];
 
 const COMMON_ALLERGENS: Array<{
@@ -72,7 +74,7 @@ const COMMON_ALLERGENS: Array<{
 }> = [
   { key: 'milk', label: { en: 'Dairy / Milk', pl: 'Nabiał / Mleko', az: 'Süd məhsulları' } },
   { key: 'eggs', label: { en: 'Eggs', pl: 'Jajka', az: 'Yumurta' } },
-  { key: 'gluten', label: { en: 'Gluten / Wheat', pl: 'Gluten / Pszenica', az: 'Qlüten / Buğda' } },
+  { key: 'gluten', label: { en: 'Gluten / Wheat', pl: 'Gluten / Pszenica', az: 'Qluten / Buğda' } },
   { key: 'fish', label: { en: 'Fish & Seafood', pl: 'Ryby i owoce morza', az: 'Balıq və dəniz məhsulları' } },
   { key: 'nuts', label: { en: 'Nuts & Peanuts', pl: 'Orzechy', az: 'Qoz-fındıq' } },
   { key: 'soy', label: { en: 'Soy', pl: 'Soja', az: 'Soya' } },
@@ -105,14 +107,14 @@ const FOOD_VIBE_OPTIONS: Array<{
   {
     key: 'fakeaway',
     icon: '🍔',
-    label: { en: 'Fakeaway', pl: 'Domowy Fast-Food (Fakeaway)', az: 'Evsayağı Fast-Food (Fakeaway)' },
+    label: { en: 'Fakeaway', pl: 'Domowy Fast-Food (Fakeaway)', az: 'Evsayağı Fast-Food' },
     desc: { en: 'Homemade takeaway favourites', pl: 'Ulubione dania na wynos w wersji fit', az: 'Sevimli restoran yeməkləri evdə' },
   },
   {
     key: 'budget_friendly',
     icon: '🪙',
-    label: { en: 'Budget Friendly', pl: 'Maksymalna oszczędność', az: 'Büdcə Dostu' },
-    desc: { en: 'Lowest cost per portion', pl: 'Najniższy koszt za porcję', az: 'Porsiya başına ən aşağı qiymət' },
+    label: { en: 'Budget Friendly', pl: 'Maksymalna oszczędność', az: 'Qənaətcil Seçim' },
+    desc: { en: 'Lowest cost per portion', pl: 'Najniższy koszt za porcję', az: 'Hər porsiya üçün ən sərfəli qiymət' },
   },
   {
     key: 'healthy_balanced',
@@ -123,8 +125,8 @@ const FOOD_VIBE_OPTIONS: Array<{
   {
     key: 'comfort_food',
     icon: '🍲',
-    label: { en: 'Comfort Food', pl: 'Domowe Comfort Food', az: 'Rahatlatıcı Ev Yeməkləri' },
-    desc: { en: 'Warm, hearty classics', pl: 'Rozgrzewające i sycące dania', az: 'İsti və doyurucu klassiklər' },
+    label: { en: 'Comfort Food', pl: 'Domowe Comfort Food', az: 'Doyurucu Ev Yeməkləri' },
+    desc: { en: 'Warm, hearty classics', pl: 'Rozgrzewające i sycące dania', az: 'İsti və ləzzətli klassiklər' },
   },
   {
     key: 'traditional',
@@ -526,26 +528,29 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
             <Sparkles size={18} />
           </div>
           <div>
-            <div style={{ fontSize: 10.5, fontWeight: 800, color: '#196431', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-              {step <= 6
-                ? pickLocalizedText(lang, {
-                    en: `AI Meal Planner Wizard • Step ${step} of 6`,
-                    pl: `Kreator Planu AI • Krok ${step} z 6`,
-                    az: `AI Yemək Planı Sehirbazı • Addım ${step} / 6`,
-                  })
-                : step === 7
-                ? pickLocalizedText(lang, {
-                    en: 'AI Meal Planner Wizard • Final Review',
-                    pl: 'Kreator Planu AI • Podsumowanie',
-                    az: 'AI Yemək Planı Sehirbazı • Yekun Xülasə',
-                  })
-                : pickLocalizedText(lang, {
-                    en: 'AI Meal Plan & Smart Basket Generated',
-                    pl: 'Plan Posiłków AI i Koszyk Wygenerowane',
-                    az: 'AI Yemək Planı və Alış-Veriş Səbəti Yaradıldı',
-                  })}
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: '#196431', letterSpacing: 0.35 }}>
+              {toLocaleUpper(
+                step <= 6
+                  ? pickLocalizedText(lang, {
+                      en: `AI Meal Planner Wizard • Step ${step} of 6`,
+                      pl: `Kreator Planu AI • Krok ${step} z 6`,
+                      az: `AI Yemək Planı Bələdçisi • Addım ${step} / 6`,
+                    })
+                  : step === 7
+                  ? pickLocalizedText(lang, {
+                      en: 'AI Meal Planner Wizard • Final Review',
+                      pl: 'Kreator Planu AI • Podsumowanie',
+                      az: 'AI Yemək Planı Bələdçisi • Yekun Xülasə',
+                    })
+                  : pickLocalizedText(lang, {
+                      en: 'AI Meal Plan & Smart Basket Generated',
+                      pl: 'Plan Posiłków AI i Koszyk Wygenerowane',
+                      az: 'AI Yemək Planı və Alış-Veriş Səbəti Yaradıldı',
+                    }),
+                lang
+              )}
             </div>
-            <h3 style={{ fontSize: 15, fontWeight: 800, color: '#132A19', marginTop: 1 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 800, color: '#132A19', marginTop: 2, lineHeight: 1.3 }}>
               {pickLocalizedText(lang, stepTitles[step])}
             </h3>
           </div>
@@ -1873,16 +1878,18 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
                                 style={{
                                   fontSize: 9.5,
                                   fontWeight: 800,
-                                  textTransform: 'uppercase',
                                   color: '#196431',
-                                  minWidth: 58,
+                                  minWidth: 64,
                                 }}
                               >
-                                {m.mealType === 'breakfast'
-                                  ? t.breakfast
-                                  : m.mealType === 'lunch'
-                                  ? t.lunch
-                                  : t.dinner}
+                                {toLocaleUpper(
+                                  m.mealType === 'breakfast'
+                                    ? t.breakfast
+                                    : m.mealType === 'lunch'
+                                    ? t.lunch
+                                    : t.dinner,
+                                  lang
+                                )}
                               </span>
                               <span style={{ fontWeight: 700, color: '#132A19' }}>
                                 {pickLocalizedText(lang, {
@@ -1893,7 +1900,7 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
                               </span>
                             </div>
                             <span style={{ fontSize: 10.5, color: '#647067', fontWeight: 700, flexShrink: 0 }}>
-                              {m.recipe.totalTimeMin}m • {formatPln(m.scaledCostPln, wizCurrency)}
+                              {formatMinutes(m.recipe.totalTimeMin, lang)} • {formatPln(m.scaledCostPln, wizCurrency)}
                             </span>
                           </div>
                         ))}

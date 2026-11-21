@@ -236,3 +236,94 @@ export function pickLocalizedList(
   if (lang === 'pl' && lists.pl && lists.pl.length > 0) return lists.pl;
   return lists.en || lists.pl || lists.az || [];
 }
+
+/**
+ * Locale-aware uppercase conversion that preserves Azerbaijani dotted 'İ' (U+0130)
+ * and dotless 'I' (U+0049) instead of relying on non-locale-aware ASCII uppercase.
+ */
+export function toLocaleUpper(text: string, lang: Language = 'en'): string {
+  if (!text) return '';
+  const locale = lang === 'az' ? 'az-AZ' : lang === 'pl' ? 'pl-PL' : 'en-US';
+  try {
+    return text.toLocaleUpperCase(locale);
+  } catch {
+    return text.toUpperCase();
+  }
+}
+
+/**
+ * Localizes quantity / package size labels (g/q, kg/kq, pcs/szt./ədəd) to match the active UI language.
+ */
+export function localizeQuantityLabel(label: string | undefined | null, lang: Language): string {
+  if (!label) return '';
+  if (lang === 'az') {
+    return label
+      .replace(/(\d+(?:[.,]\d+)?)\s*kg(?=\s|$|[),.])/gi, '$1 kq')
+      .replace(/(\d+(?:[.,]\d+)?)\s*g(?=\s|$|[),.])/gi, '$1 q')
+      .replace(/(?:szt\.|szt|pcs|pc)(?=\s|$|[),.])/gi, 'ədəd')
+      .replace(/(?:op\.|pack)(?=\s|$|[),.])/gi, 'bağlama');
+  }
+  if (lang === 'pl') {
+    return label
+      .replace(/(\d+(?:[.,]\d+)?)\s*kq(?=\s|$|[),.])/gi, '$1 kg')
+      .replace(/(\d+(?:[.,]\d+)?)\s*q(?=\s|$|[),.])/gi, '$1 g')
+      .replace(/(?:ədəd|pcs|pc)(?=\s|$|[),.])/gi, 'szt.');
+  }
+  return label
+    .replace(/(\d+(?:[.,]\d+)?)\s*kq(?=\s|$|[),.])/gi, '$1 kg')
+    .replace(/(\d+(?:[.,]\d+)?)\s*q(?=\s|$|[),.])/gi, '$1 g')
+    .replace(/(?:szt\.|szt|ədəd)(?=\s|$|[),.])/gi, 'pcs')
+    .replace(/(?:op\.|bağlama)(?=\s|$|[),.])/gi, 'pack');
+}
+
+/**
+ * Formats minutes with the correct localized unit ('min' for EN/PL, 'dəq' for AZ).
+ */
+export function formatMinutes(mins: number, lang: Language): string {
+  return `${mins} ${lang === 'az' ? 'dəq' : 'min'}`;
+}
+
+/**
+ * Formats item counts with proper pluralization rules for English, Polish, and Azerbaijani.
+ */
+export function formatItemsCount(count: number, lang: Language): string {
+  if (lang === 'az') {
+    return `${count} məhsul`;
+  }
+  if (lang === 'pl') {
+    if (count === 1) return '1 produkt';
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) {
+      return `${count} produkty`;
+    }
+    return `${count} produktów`;
+  }
+  return `${count} ${count === 1 ? 'item' : 'items'}`;
+}
+
+/**
+ * Embedded SVG Data URI fallback so meal/product images never render as a broken image icon or clipped alt text,
+ * even when offline or if an external CDN image fails to load.
+ */
+export const FALLBACK_MEAL_IMAGE_DATA_URI =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">` +
+      `<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E6F4EA"/><stop offset="100%" stop-color="#CBE4D2"/></linearGradient></defs>` +
+      `<rect width="240" height="240" rx="24" fill="url(#bg)"/>` +
+      `<circle cx="120" cy="120" r="76" fill="#FFFFFF" stroke="#196431" stroke-width="5"/>` +
+      `<circle cx="120" cy="120" r="56" fill="#F2F9F4" stroke="#A7D7B5" stroke-width="2" stroke-dasharray="6 4"/>` +
+      `<path d="M92 108c10-16 46-16 56 0 6 12-4 32-28 32s-34-20-28-32z" fill="#2B8A44" opacity="0.9"/>` +
+      `<circle cx="108" cy="112" r="7" fill="#F59E0B"/>` +
+      `<circle cx="132" cy="114" r="6" fill="#EF4444"/>` +
+      `<circle cx="120" cy="126" r="6" fill="#FBBF24"/>` +
+      `</svg>`
+  );
+
+export function handleMealImageError(e: { currentTarget: HTMLImageElement }): void {
+  const img = e.currentTarget;
+  if (!img || img.dataset.fallbackApplied === '1') return;
+  img.dataset.fallbackApplied = '1';
+  img.src = FALLBACK_MEAL_IMAGE_DATA_URI;
+}

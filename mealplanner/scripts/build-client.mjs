@@ -23,10 +23,10 @@ await esbuild.build({
 });
 
 const html = `<!DOCTYPE html>
-<html lang="pl">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#196431" />
   <title>MealPlanner — Plan meals • Save money • Shop smarter</title>
   <link rel="stylesheet" href="./bundle.css" />

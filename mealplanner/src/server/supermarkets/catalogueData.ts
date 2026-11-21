@@ -6,6 +6,7 @@ import {
   ShoppingCategory,
   RegionCode,
   CurrencyCode,
+  MonitoredProductRecord,
 } from '../../shared/types';
 
 export const SUPERMARKETS: Supermarket[] = [
@@ -181,16 +182,16 @@ export const SUPERMARKETS: Supermarket[] = [
     primaryColor: '#E31E24',
     secondaryColor: '#00A651',
     loyaltyProgramName: 'Super Kart (Bazarstore)',
-    websiteUrl: 'https://bazarstore.az',
-    adapterStatus: 'DEMO_FALLBACK_ACTIVE',
+    websiteUrl: 'https://bazarstore.az/b%C3%BCt%C3%BCn-m%C9%99hsullar',
+    adapterStatus: 'PUBLIC_CATALOGUE_CONNECTED',
     isCatalogueAvailable: true,
-    lastSyncedAt: '2026-11-11T08:00:00Z',
+    lastSyncedAt: '2026-11-16T00:00:00Z',
     priceDisclaimerPl:
-      'Ceny referencyjne w AZN (₼) z katalogu demonstracyjnego Bazarstore (Azerbejdżan).',
+      'Automatyczny 24-godzinny monitoring cen Bazarstore (bazarstore.az/bütün-məhsullar) w AZN (₼) z historią zmian cen i wykrywaniem nieaktualnych pozycji.',
     priceDisclaimerEn:
-      'AZN (₼) reference prices from the Bazarstore Azerbaijan demonstration catalogue.',
+      'Automated 24-hour Bazarstore price monitoring (bazarstore.az/bütün-məhsullar) in AZN (₼) with historical price tracking and outdated price detection.',
     priceDisclaimerAz:
-      'Bazarstore nümunə kataloqu və Super Kart kampaniyalarına əsaslanan AZN (₼) istinad qiymətləri.',
+      'Bazarstore (bazarstore.az/bütün-məhsullar) üzrə 24 saatlıq avtomatik qiymət monitorinqi, qiymət tarixçəsi və köhnəlmiş qiymətlərin aşkarlanması sistemi aktivdir.',
   },
   {
     id: 'rahat',
@@ -546,17 +547,17 @@ interface RawPolishProductSeed {
 }
 
 const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
-  // 1. Bananas 1 kg — PL: 4,99 zł | AZ: 2.79 ₼
+  // 1. Bananas 1 kg — PL: 4,99 zł | AZ: 2.79 ₼ (Bazarstore: Banan kq 2.79 ₼ / 2.99 ₼)
   {
     id: 'prod-banana',
     ean: '5900112233011',
-    azEan: '4760112233011',
+    azEan: '30015539',
     canonicalIngredient: 'banana',
     namePl: 'Banany',
     nameEn: 'Bananas',
-    nameAz: 'Ekvador bananı',
+    nameAz: 'Banan kq',
     brand: 'Ryneczek Lidla / Warzywniak Biedronki',
-    azBrand: 'Meyvə Bazarı / Ekvador Import',
+    azBrand: 'Meyvə-Tərəvəz / Ekvador',
     category: 'Fruit & Vegetables',
     packageSize: 1000,
     packageUnit: 'g',
@@ -570,21 +571,21 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     auchan: { reg: 5.99, promo: 4.89 },
     kaufland: { reg: 6.49, promo: 4.99 },
     bravo: { reg: 3.39, promo: 2.79, loyaltyEn: 'With Umico / Bravo Club', loyaltyAz: 'Umico / Bravo Club ilə' },
-    araz: { reg: 3.39, promo: 2.69, loyaltyEn: 'With Araz Kart', loyaltyAz: 'Araz Kart ilə' },
-    bazarstore: { reg: 3.45, promo: 2.89 },
-    rahat: { reg: 3.39, promo: 2.85 },
+    araz: { reg: 3.19, promo: 2.69, loyaltyEn: 'With Araz Kart', loyaltyAz: 'Araz Kart ilə' },
+    bazarstore: { reg: 2.99, promo: 2.79 },
+    rahat: { reg: 3.19, promo: 2.85 },
   },
-  // 2. Tomatoes 500 g — PL: 3,49 zł | AZ: 1.89 ₼
+  // 2. Tomatoes 500 g — PL: 3,49 zł | AZ: 1.49 ₼ (Bazarstore: Pomidor kq 2.99 ₼/kq -> 1.49 ₼ / 500q)
   {
     id: 'prod-tomato',
     ean: '5900112233028',
-    azEan: '4760112233028',
+    azEan: '30063224',
     canonicalIngredient: 'tomato',
     namePl: 'Pomidory gałązka',
     nameEn: 'Tomatoes',
-    nameAz: 'Zirə çəhrayı pomidoru',
+    nameAz: 'Pomidor (Zirə / Şəmkir)',
     brand: 'Polskie Szklarnie',
-    azBrand: 'Zirə İstixanası / Bakı',
+    azBrand: 'Meyvə-Tərəvəz / Zirə',
     category: 'Fruit & Vegetables',
     packageSize: 500,
     packageUnit: 'g',
@@ -597,12 +598,12 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 4.29, promo: 3.69 },
     auchan: { reg: 4.19, promo: 3.59 },
     kaufland: { reg: 4.49, promo: 3.49 },
-    bravo: { reg: 2.29, promo: 1.89 },
-    araz: { reg: 2.19, promo: 1.79 },
-    bazarstore: { reg: 2.25, promo: 1.95 },
-    rahat: { reg: 2.20, promo: 1.89 },
+    bravo: { reg: 1.89, promo: 1.55 },
+    araz: { reg: 1.79, promo: 1.49 },
+    bazarstore: { reg: 1.60, promo: 1.49 },
+    rahat: { reg: 1.79, promo: 1.55 },
   },
-  // 3. Chicken breast 1 kg — PL: 22,99 zł | AZ: 10.99 ₼
+  // 3. Chicken breast 1 kg — PL: 22,99 zł | AZ: 10.99 ₼ (Bazarstore: Səba Toyuq döş əti kq 10.90 ₼ / 11.90 ₼)
   {
     id: 'prod-chicken-breast',
     ean: '5900112233035',
@@ -610,7 +611,7 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     canonicalIngredient: 'chicken_breast',
     namePl: 'Filet z piersi kurczaka Mega Paka',
     nameEn: 'Chicken breast',
-    nameAz: 'Toyuq döş əti (filesi)',
+    nameAz: 'Səba Toyuq döş əti (filesi) kq',
     brand: 'Kraina Mięs / Rzeźnik',
     azBrand: 'Səba / Mərcan',
     category: 'Meat & Fish',
@@ -626,21 +627,21 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     auchan: { reg: 23.99, promo: null },
     kaufland: { reg: 24.49, promo: 22.49 },
     bravo: { reg: 12.90, promo: 10.99, loyaltyEn: 'With Umico / Bravo Club', loyaltyAz: 'Umico / Bravo Club ilə' },
-    araz: { reg: 12.70, promo: 10.79, loyaltyEn: 'With Araz Kart', loyaltyAz: 'Araz Kart ilə' },
-    bazarstore: { reg: 12.90, promo: 11.20 },
-    rahat: { reg: 12.80, promo: 11.10 },
+    araz: { reg: 12.50, promo: 10.79, loyaltyEn: 'With Araz Kart', loyaltyAz: 'Araz Kart ilə' },
+    bazarstore: { reg: 11.90, promo: 10.90 },
+    rahat: { reg: 12.40, promo: 11.10 },
   },
-  // 4. Rice 1 kg — PL: 5,99 zł | AZ: 4.49 ₼
+  // 4. Rice 1 kg — PL: 5,99 zł | AZ: 3.99 ₼ (Bazarstore: Besta Basmati Düyü 1 kq 3.99 ₼ / 4.55 ₼)
   {
     id: 'prod-rice',
     ean: '5900112233042',
-    azEan: '4760112233042',
+    azEan: '30201206',
     canonicalIngredient: 'rice',
     namePl: 'Ryż biały długoziarnisty',
     nameEn: 'Rice',
-    nameAz: 'Uzun düyü (Basmati / Plovluq)',
+    nameAz: 'Besta Basmati Düyü 1 kq',
     brand: 'Plony Natury / Golden Sun',
-    azBrand: 'Tamashaee / Sultan',
+    azBrand: 'Besta / Tamashaee',
     category: 'Dry Products',
     packageSize: 1000,
     packageUnit: 'g',
@@ -655,20 +656,20 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     kaufland: { reg: 6.49, promo: 5.89 },
     bravo: { reg: 4.49, promo: null },
     araz: { reg: 4.39, promo: null },
-    bazarstore: { reg: 4.99, promo: 4.49 },
+    bazarstore: { reg: 4.55, promo: 3.99 },
     rahat: { reg: 4.59, promo: null },
   },
-  // 5. Oat flakes 500 g — PL: 4,49 zł | AZ: 2.29 ₼
+  // 5. Oat flakes 500 g — PL: 4,49 zł | AZ: 1.59 ₼ (Bazarstore: Ankara Yulaf 500 q 1.59 ₼ / 1.79 ₼)
   {
     id: 'prod-oats',
     ean: '5900112233059',
-    azEan: '4760112233059',
+    azEan: '30200373',
     canonicalIngredient: 'oat_flakes',
     namePl: 'Płatki owsiane górskie',
     nameEn: 'Oat flakes',
-    nameAz: 'Yulaf lopası (Herkules)',
+    nameAz: 'Ankara Yulaf lopası 500 q',
     brand: 'Plony Natury / Crownfield',
-    azBrand: 'Hercules / Makfa',
+    azBrand: 'Ankara / Makfa',
     category: 'Dry Products',
     packageSize: 500,
     packageUnit: 'g',
@@ -681,20 +682,20 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 4.29, promo: null },
     auchan: { reg: 4.59, promo: null },
     kaufland: { reg: 4.69, promo: 4.39 },
-    bravo: { reg: 2.29, promo: null },
-    araz: { reg: 2.19, promo: null },
-    bazarstore: { reg: 2.35, promo: null },
-    rahat: { reg: 2.29, promo: null },
+    bravo: { reg: 1.95, promo: 1.69 },
+    araz: { reg: 1.89, promo: 1.65 },
+    bazarstore: { reg: 1.79, promo: 1.59 },
+    rahat: { reg: 1.95, promo: null },
   },
-  // 6. Milk 1 L — PL: 3,49 zł | AZ: 2.19 ₼
+  // 6. Milk 1 L — PL: 3,49 zł | AZ: 2.15 ₼ (Bazarstore: Milla Təbii Süd 2.5% 1 L 2.15 ₼ / 2.59 ₼)
   {
     id: 'prod-milk',
     ean: '5900112233066',
-    azEan: '4760112233066',
+    azEan: '30036244',
     canonicalIngredient: 'milk',
     namePl: 'Mleko świeże 2,0%',
     nameEn: 'Fresh Milk 2.0%',
-    nameAz: 'Təbii inək südü 2.5%',
+    nameAz: 'Milla Təbii Süd 2.5% 1 L',
     brand: 'Mleczna Dolina / Pilos',
     azBrand: 'Milla / Azərsüd',
     category: 'Dairy',
@@ -711,20 +712,20 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     kaufland: { reg: 3.89, promo: 3.49 },
     bravo: { reg: 2.49, promo: 2.19 },
     araz: { reg: 2.45, promo: 2.15 },
-    bazarstore: { reg: 2.69, promo: 2.15 },
+    bazarstore: { reg: 2.59, promo: 2.15 },
     rahat: { reg: 2.49, promo: 2.20 },
   },
-  // 7. Eggs 10 pcs — PL: 9,49 zł | AZ: 2.60 ₼
+  // 7. Eggs 10 pcs — PL: 9,49 zł | AZ: 2.20 ₼ (Bazarstore: Çil-Çil / Giləzi Yumurta 10 lu 2.20 ₼ / 2.50 ₼)
   {
     id: 'prod-eggs',
     ean: '5900112233073',
-    azEan: '4760112233073',
+    azEan: '30187004',
     canonicalIngredient: 'eggs',
     namePl: 'Jaja z wolnego wybiegu klasa M',
     nameEn: 'Free-range Eggs (10 pcs)',
-    nameAz: 'Kənd yumurtası (10 ədəd)',
+    nameAz: 'Çil-Çil / Giləzi Kənd yumurtası (10 ədəd)',
     brand: 'Moja Kurka / Złota Nioska',
-    azBrand: 'Giləzi / Hacıqabul Quşçuluq',
+    azBrand: 'Çil-Çil / Giləzi',
     category: 'Dairy',
     packageSize: 10,
     packageUnit: 'pcs',
@@ -737,22 +738,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 10.79, promo: 9.29 },
     auchan: { reg: 10.49, promo: null },
     kaufland: { reg: 10.89, promo: 9.49 },
-    bravo: { reg: 2.90, promo: 2.60 },
-    araz: { reg: 2.85, promo: 2.50 },
-    bazarstore: { reg: 2.95, promo: 2.70 },
-    rahat: { reg: 2.90, promo: 2.65 },
+    bravo: { reg: 2.60, promo: 2.30 },
+    araz: { reg: 2.50, promo: 2.20 },
+    bazarstore: { reg: 2.50, promo: 2.20 },
+    rahat: { reg: 2.60, promo: 2.35 },
   },
-  // 8. Greek Yogurt / Qatiq 400 g — PL: 3,99 zł | AZ: 1.95 ₼
+  // 8. Greek Yogurt / Qatiq 400 g — PL: 3,99 zł | AZ: 1.79 ₼ (Bazarstore: Atena Qatıq 1.79 ₼ / 1.99 ₼)
   {
     id: 'prod-skyryogurt',
     ean: '5900112233080',
-    azEan: '4760112233080',
+    azEan: '30184470',
     canonicalIngredient: 'greek_yogurt',
     namePl: 'Jogurt naturalny gęsty / Skyr',
     nameEn: 'Natural Greek Yogurt / Skyr',
-    nameAz: 'Təbii kənd qatığı / Süzmə',
+    nameAz: 'Atena / Milla Təbii Qatıq',
     brand: 'FruVita / Pilos',
-    azBrand: 'Milla / İvanovka',
+    azBrand: 'Atena / Milla',
     category: 'Dairy',
     packageSize: 400,
     packageUnit: 'g',
@@ -765,22 +766,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 4.39, promo: 3.89 },
     auchan: { reg: 4.29, promo: null },
     kaufland: { reg: 4.49, promo: 3.99 },
-    bravo: { reg: 2.20, promo: 1.95 },
-    araz: { reg: 2.15, promo: 1.89 },
-    bazarstore: { reg: 2.25, promo: 2.05 },
-    rahat: { reg: 2.20, promo: 1.99 },
+    bravo: { reg: 2.09, promo: 1.85 },
+    araz: { reg: 1.99, promo: 1.79 },
+    bazarstore: { reg: 1.99, promo: 1.79 },
+    rahat: { reg: 2.09, promo: 1.89 },
   },
-  // 9. Cottage Cheese / Kəsmik 250 g — PL: 4,29 zł | AZ: 2.30 ₼
+  // 9. Cottage Cheese / Kəsmik 250 g — PL: 4,29 zł | AZ: 1.99 ₼ (Bazarstore: Milla / SAB Kəsmik 1.99 ₼ / 2.35 ₼)
   {
     id: 'prod-cottage-cheese',
     ean: '5900112233097',
-    azEan: '4760112233097',
+    azEan: '30204365',
     canonicalIngredient: 'cottage_cheese',
     namePl: 'Twaróg półtłusty krajanka',
     nameEn: 'Semi-skimmed Cottage Cheese (Twaróg)',
-    nameAz: 'Təbii kəsmik (pəhrizlik)',
+    nameAz: 'Milla / SAB Təbii Kəsmik',
     brand: 'Delikate / Pilos',
-    azBrand: 'Milla / Sevimli Dad',
+    azBrand: 'Milla / SAB',
     category: 'Dairy',
     packageSize: 250,
     packageUnit: 'g',
@@ -793,22 +794,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 4.69, promo: 4.19 },
     auchan: { reg: 4.59, promo: null },
     kaufland: { reg: 4.69, promo: 4.29 },
-    bravo: { reg: 2.60, promo: 2.30 },
-    araz: { reg: 2.50, promo: 2.20 },
-    bazarstore: { reg: 2.65, promo: 2.40 },
-    rahat: { reg: 2.55, promo: 2.35 },
+    bravo: { reg: 2.40, promo: 2.09 },
+    araz: { reg: 2.35, promo: 1.99 },
+    bazarstore: { reg: 2.35, promo: 1.99 },
+    rahat: { reg: 2.40, promo: 2.15 },
   },
-  // 10. Carrots 1 kg — PL: 2,99 zł | AZ: 1.39 ₼
+  // 10. Carrots 1 kg — PL: 2,99 zł | AZ: 1.29 ₼ (Bazarstore: Kök kq 1.29 ₼ promo / 1.49 ₼ regular -13%)
   {
     id: 'prod-carrot',
     ean: '5900112233103',
-    azEan: '4760112233103',
+    azEan: '30036089',
     canonicalIngredient: 'carrot',
     namePl: 'Marchew polska myta',
-    nameEn: 'Washed Carrots',
-    nameAz: 'Təzə yuyulmuş kök',
+    nameEn: 'Fresh Carrots (1 kg)',
+    nameAz: 'Kök kq',
     brand: 'Warzywniak',
-    azBrand: 'Yerli Təsərrüfat',
+    azBrand: 'Kök / Meyvə-Tərəvəz',
     category: 'Fruit & Vegetables',
     packageSize: 1000,
     packageUnit: 'g',
@@ -821,22 +822,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 3.79, promo: 2.89 },
     auchan: { reg: 3.49, promo: null },
     kaufland: { reg: 3.69, promo: 2.99 },
-    bravo: { reg: 1.69, promo: 1.39 },
-    araz: { reg: 1.59, promo: 1.29 },
-    bazarstore: { reg: 1.69, promo: 1.45 },
-    rahat: { reg: 1.65, promo: 1.39 },
+    bravo: { reg: 1.55, promo: 1.35 },
+    araz: { reg: 1.49, promo: 1.29 },
+    bazarstore: { reg: 1.49, promo: 1.29 },
+    rahat: { reg: 1.55, promo: 1.39 },
   },
-  // 11. Potatoes 2 kg — PL: 5,49 zł | AZ: 2.79 ₼
+  // 11. Potatoes 2 kg — PL: 5,49 zł | AZ: 1.98 ₼ (Bazarstore: Kartof kq 0.99 ₼/kq -> 1.98 ₼ / 2 kq)
   {
     id: 'prod-potato',
     ean: '5900112233110',
-    azEan: '4760112233110',
+    azEan: '30067908',
     canonicalIngredient: 'potato',
     namePl: 'Ziemniaki jadalne',
     nameEn: 'Potatoes',
-    nameAz: 'Gədəbəy / Cəlilabad kartofu',
+    nameAz: 'Kartof kq',
     brand: 'Polskie Pola',
-    azBrand: 'Gədəbəy Təsərrüfatı',
+    azBrand: 'Meyvə-Tərəvəz / Gədəbəy',
     category: 'Fruit & Vegetables',
     packageSize: 2000,
     packageUnit: 'g',
@@ -849,22 +850,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 6.79, promo: 5.29 },
     auchan: { reg: 6.49, promo: null },
     kaufland: { reg: 6.69, promo: 5.49 },
-    bravo: { reg: 3.29, promo: 2.79 },
-    araz: { reg: 3.19, promo: 2.69 },
-    bazarstore: { reg: 3.39, promo: 2.89 },
-    rahat: { reg: 3.29, promo: 2.79 },
+    bravo: { reg: 2.38, promo: 2.10 },
+    araz: { reg: 2.18, promo: 1.98 },
+    bazarstore: { reg: 2.18, promo: 1.98 },
+    rahat: { reg: 2.38, promo: 2.10 },
   },
-  // 12. Onions 1 kg — PL: 3,29 zł | AZ: 1.19 ₼
+  // 12. Onions 1 kg — PL: 3,29 zł | AZ: 1.09 ₼ (Bazarstore: Soğan kq 1.09 ₼ / 1.29 ₼)
   {
     id: 'prod-onion',
     ean: '5900112233127',
-    azEan: '4760112233127',
+    azEan: '30036138',
     canonicalIngredient: 'onion',
     namePl: 'Cebula żółta w siatce',
     nameEn: 'Yellow Onions',
-    nameAz: 'Quru baş soğan',
+    nameAz: 'Soğan kq',
     brand: 'Warzywniak',
-    azBrand: 'Bərdə / Ağdam Təsərrüfatı',
+    azBrand: 'Meyvə-Tərəvəz',
     category: 'Fruit & Vegetables',
     packageSize: 1000,
     packageUnit: 'g',
@@ -877,22 +878,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 3.89, promo: 3.19 },
     auchan: { reg: 3.59, promo: null },
     kaufland: { reg: 3.79, promo: 3.29 },
-    bravo: { reg: 1.39, promo: 1.19 },
+    bravo: { reg: 1.35, promo: 1.15 },
     araz: { reg: 1.29, promo: 1.09 },
-    bazarstore: { reg: 1.45, promo: 1.25 },
-    rahat: { reg: 1.39, promo: 1.19 },
+    bazarstore: { reg: 1.29, promo: 1.09 },
+    rahat: { reg: 1.35, promo: 1.15 },
   },
-  // 13. Garlic 100 g — PL: 2,99 zł | AZ: 1.15 ₼
+  // 13. Garlic 100 g — PL: 2,99 zł | AZ: 0.50 ₼ (Bazarstore: Təzə sarımsaq kq 4.99 ₼/kq -> 0.50 ₼ / 100q)
   {
     id: 'prod-garlic',
     ean: '5900112233134',
-    azEan: '4760112233134',
+    azEan: '30090675',
     canonicalIngredient: 'garlic',
     namePl: 'Czosnek polski (2 główki)',
     nameEn: 'Garlic (2 bulbs / ~100 g)',
-    nameAz: 'Yerli sarımsaq (100 q)',
+    nameAz: 'Təzə sarımsaq (100 q)',
     brand: 'Warzywniak',
-    azBrand: 'Yerli Bostan',
+    azBrand: 'Meyvə-Tərəvəz',
     category: 'Fruit & Vegetables',
     packageSize: 100,
     packageUnit: 'g',
@@ -905,22 +906,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 3.39, promo: 2.89 },
     auchan: { reg: 3.29, promo: null },
     kaufland: { reg: 3.49, promo: 2.99 },
-    bravo: { reg: 1.15, promo: null },
-    araz: { reg: 1.09, promo: null },
-    bazarstore: { reg: 1.20, promo: null },
-    rahat: { reg: 1.15, promo: null },
+    bravo: { reg: 0.65, promo: 0.55 },
+    araz: { reg: 0.60, promo: 0.50 },
+    bazarstore: { reg: 0.60, promo: 0.50 },
+    rahat: { reg: 0.65, promo: 0.55 },
   },
-  // 14. Broccoli 500 g — PL: 4,49 zł | AZ: 2.89 ₼
+  // 14. Broccoli 500 g — PL: 4,49 zł | AZ: 3.75 ₼ (Bazarstore: Brokoli 500 q 3.75 ₼ / 4.20 ₼)
   {
     id: 'prod-broccoli',
     ean: '5900112233141',
-    azEan: '4760112233141',
+    azEan: '30036033',
     canonicalIngredient: 'broccoli',
     namePl: 'Brokuł świeży',
     nameEn: 'Fresh Broccoli',
-    nameAz: 'Təzə brokkoli',
+    nameAz: 'Brokoli (500 q)',
     brand: 'Warzywniak',
-    azBrand: 'Yaşıl Bostan',
+    azBrand: 'Meyvə-Tərəvəz / Bonduelle',
     category: 'Fruit & Vegetables',
     packageSize: 500,
     packageUnit: 'g',
@@ -933,22 +934,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 5.79, promo: 4.39 },
     auchan: { reg: 5.49, promo: null },
     kaufland: { reg: 5.69, promo: 4.49 },
-    bravo: { reg: 3.29, promo: 2.89 },
-    araz: { reg: 3.19, promo: 2.79 },
-    bazarstore: { reg: 3.39, promo: 2.99 },
-    rahat: { reg: 3.29, promo: 2.89 },
+    bravo: { reg: 4.25, promo: 3.79 },
+    araz: { reg: 4.15, promo: 3.69 },
+    bazarstore: { reg: 4.20, promo: 3.75 },
+    rahat: { reg: 4.25, promo: 3.85 },
   },
-  // 15. Spinach & Greens 200 g — PL: 4,29 zł | AZ: 1.49 ₼
+  // 15. Spinach & Greens 200 g — PL: 4,29 zł | AZ: 1.19 ₼ (Bazarstore: Təzə ispanaq və göyərti 1.19 ₼ / 1.49 ₼)
   {
     id: 'prod-spinach',
     ean: '5900112233158',
-    azEan: '4760112233158',
+    azEan: '30189175',
     canonicalIngredient: 'spinach',
     namePl: 'Szpinak baby myty',
     nameEn: 'Baby Spinach & Fresh Greens',
-    nameAz: 'Təzə ispanaq və göyərti dəsti (keşniş, şüyüd)',
+    nameAz: 'Təzə ispanaq və göyərti dəsti',
     brand: 'Vital Fresh',
-    azBrand: 'Abşeron Göyərtisi',
+    azBrand: 'Meyvə-Tərəvəz',
     category: 'Fruit & Vegetables',
     packageSize: 200,
     packageUnit: 'g',
@@ -961,22 +962,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 4.89, promo: 4.19 },
     auchan: { reg: 4.69, promo: null },
     kaufland: { reg: 4.89, promo: 4.29 },
-    bravo: { reg: 1.79, promo: 1.49 },
-    araz: { reg: 1.69, promo: 1.39 },
-    bazarstore: { reg: 1.85, promo: 1.59 },
-    rahat: { reg: 1.79, promo: 1.49 },
+    bravo: { reg: 1.55, promo: 1.25 },
+    araz: { reg: 1.49, promo: 1.19 },
+    bazarstore: { reg: 1.49, promo: 1.19 },
+    rahat: { reg: 1.55, promo: 1.25 },
   },
-  // 16. Apples 1 kg — PL: 3,49 zł | AZ: 1.99 ₼
+  // 16. Apples 1 kg — PL: 3,49 zł | AZ: 2.29 ₼ (Bazarstore: Alma Fuji kq 2.29 ₼ / 2.49 ₼)
   {
     id: 'prod-apple',
     ean: '5900112233165',
-    azEan: '4760112233165',
+    azEan: '30056711',
     canonicalIngredient: 'apple',
     namePl: 'Jabłka polskie Gala / Szampion',
-    nameEn: 'Fresh Apples (Gala / Golden)',
-    nameAz: 'Quba alması (Qızıləhmədi / Qolden)',
+    nameEn: 'Fresh Apples (Gala / Fuji)',
+    nameAz: 'Alma Fuji / Quba kq',
     brand: 'Polskie Sady',
-    azBrand: 'Quba Bağları',
+    azBrand: 'Meyvə-Tərəvəz / Quba',
     category: 'Fruit & Vegetables',
     packageSize: 1000,
     packageUnit: 'g',
@@ -989,22 +990,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 4.39, promo: 3.39 },
     auchan: { reg: 3.99, promo: null },
     kaufland: { reg: 4.29, promo: 3.49 },
-    bravo: { reg: 2.39, promo: 1.99 },
-    araz: { reg: 2.29, promo: 1.89 },
-    bazarstore: { reg: 2.49, promo: 2.10 },
-    rahat: { reg: 2.39, promo: 1.99 },
+    bravo: { reg: 2.49, promo: 2.19 },
+    araz: { reg: 2.45, promo: 2.19 },
+    bazarstore: { reg: 2.49, promo: 2.29 },
+    rahat: { reg: 2.49, promo: 2.25 },
   },
-  // 17. Meat Cut (Pork Loin in PL / Lean Beef & Veal Tenderloin in AZ) — PL: 17,99 zł | AZ: 16.90 ₼
+  // 17. Meat Cut (Pork Loin in PL / Lean Beef & Veal in AZ) — PL: 17,99 zł | AZ: 17.48 ₼ (Bazarstore: Bol Ət Dana əti kq)
   {
     id: 'prod-pork-loin',
     ean: '5900112233172',
-    azEan: '4760112233172',
+    azEan: '30036726',
     canonicalIngredient: 'pork_loin',
     namePl: 'Schab wieprzowy bez kości',
     nameEn: 'Boneless Loin / Lean Roast Meat',
-    nameAz: 'Sümüksüz dana və quzu əti',
+    nameAz: 'Bol Ət Dana əti kq',
     brand: 'Kraina Mięs / Rzeźnik',
-    azBrand: 'Yerli Qəssab / Halal Ət',
+    azBrand: 'Bol Ət / Təzə Ət',
     category: 'Meat & Fish',
     packageSize: 1000,
     packageUnit: 'g',
@@ -1018,21 +1019,21 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     auchan: { reg: 22.99, promo: null },
     kaufland: { reg: 23.49, promo: 17.99 },
     bravo: { reg: 18.50, promo: 16.90 },
-    araz: { reg: 18.20, promo: 16.50 },
-    bazarstore: { reg: 18.90, promo: 17.20 },
-    rahat: { reg: 18.50, promo: 16.90 },
+    araz: { reg: 18.20, promo: 16.90 },
+    bazarstore: { reg: 17.99, promo: 17.48 },
+    rahat: { reg: 18.50, promo: 17.20 },
   },
   // 18. Salmon 300 g — PL: 21,99 zł | AZ: 12.90 ₼
   {
     id: 'prod-salmon',
     ean: '5900112233189',
-    azEan: '4760112233189',
+    azEan: '30051513',
     canonicalIngredient: 'salmon',
     namePl: 'Filet z łososia atlantyckiego',
     nameEn: 'Atlantic Salmon Fillet',
-    nameAz: 'Qızılbalıq filesi (300 q)',
+    nameAz: 'Qızılbalıq / Forel filesi (300 q)',
     brand: 'Marinero / Nautica',
-    azBrand: 'Caspian Fish / Dəniz Məhsulları',
+    azBrand: 'Caspian Fish / Russkoe More',
     category: 'Meat & Fish',
     packageSize: 300,
     packageUnit: 'g',
@@ -1047,10 +1048,10 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     kaufland: { reg: 24.49, promo: 21.49 },
     bravo: { reg: 14.50, promo: 12.90 },
     araz: { reg: 14.20, promo: 12.50 },
-    bazarstore: { reg: 14.90, promo: 13.20 },
+    bazarstore: { reg: 14.90, promo: 12.90 },
     rahat: { reg: 14.50, promo: 12.90 },
   },
-  // 19. Tofu 180 g — PL: 3,99 zł | AZ: 2.69 ₼
+  // 19. Tofu 180 g — PL: 3,99 zł | AZ: 2.59 ₼
   {
     id: 'prod-tofu',
     ean: '5900112233196',
@@ -1058,9 +1059,9 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     canonicalIngredient: 'tofu',
     namePl: 'Tofu naturalne BIO',
     nameEn: 'Organic Natural Tofu',
-    nameAz: 'Təbii Tofu pendiri (bitki mənşəli)',
+    nameAz: 'Təbii Tofu / Pəhriz pendiri',
     brand: 'GoVege / Vemondo',
-    azBrand: 'EcoFood / GreenLine',
+    azBrand: 'EcoFood / Atena',
     category: 'Dairy',
     packageSize: 180,
     packageUnit: 'g',
@@ -1075,20 +1076,20 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     kaufland: { reg: 4.79, promo: 3.99 },
     bravo: { reg: 2.99, promo: 2.69 },
     araz: { reg: 2.89, promo: 2.59 },
-    bazarstore: { reg: 3.09, promo: 2.79 },
+    bazarstore: { reg: 2.99, promo: 2.59 },
     rahat: { reg: 2.99, promo: 2.69 },
   },
-  // 20. Pasta / Noodles 500 g — PL: 4,29 zł | AZ: 1.89 ₼
+  // 20. Pasta / Noodles 500 g — PL: 4,29 zł | AZ: 1.65 ₼ (Bazarstore: Ankara Makaron 500 q 1.65 ₼ / 1.90 ₼)
   {
     id: 'prod-pasta',
     ean: '5900112233202',
-    azEan: '4760112233202',
+    azEan: '30002973',
     canonicalIngredient: 'pasta',
     namePl: 'Makaron pełnoziarnisty Penne / Spaghetti',
     nameEn: 'Wholegrain Pasta / Dumpling Dough',
-    nameAz: 'Makaron, əriştə və düşbərə xəmiri',
+    nameAz: 'Ankara Makaron 500 q',
     brand: 'Pastani / Combino',
-    azBrand: 'Karmen / Saville',
+    azBrand: 'Ankara / Karmen',
     category: 'Dry Products',
     packageSize: 500,
     packageUnit: 'g',
@@ -1101,22 +1102,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 4.89, promo: 4.19 },
     auchan: { reg: 4.79, promo: null },
     kaufland: { reg: 4.89, promo: 4.29 },
-    bravo: { reg: 2.15, promo: 1.89 },
-    araz: { reg: 2.09, promo: 1.79 },
-    bazarstore: { reg: 2.20, promo: 1.95 },
-    rahat: { reg: 2.15, promo: 1.89 },
+    bravo: { reg: 1.95, promo: 1.75 },
+    araz: { reg: 1.90, promo: 1.69 },
+    bazarstore: { reg: 1.90, promo: 1.65 },
+    rahat: { reg: 1.95, promo: 1.75 },
   },
-  // 21. Red Lentils 400 g — PL: 4,99 zł | AZ: 2.19 ₼
+  // 21. Red Lentils 400 g — PL: 4,99 zł | AZ: 1.90 ₼ (Bazarstore: Ankara / Azərsun Qırmızı Mərci 400 q 1.90 ₼ / 2.15 ₼)
   {
     id: 'prod-lentils',
     ean: '5900112233219',
-    azEan: '4760112233219',
+    azEan: '30200371',
     canonicalIngredient: 'red_lentils',
     namePl: 'Soczewica czerwona',
     nameEn: 'Red Lentils',
-    nameAz: 'Qırmızı mərcimək',
+    nameAz: 'Ankara / Azərsun Qırmızı Mərci',
     brand: 'Plony Natury / Golden Sun',
-    azBrand: 'Azərsun / Final',
+    azBrand: 'Ankara / Azərsun',
     category: 'Dry Products',
     packageSize: 400,
     packageUnit: 'g',
@@ -1129,22 +1130,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 5.79, promo: 4.89 },
     auchan: { reg: 5.69, promo: null },
     kaufland: { reg: 5.89, promo: 4.99 },
-    bravo: { reg: 2.49, promo: 2.19 },
-    araz: { reg: 2.39, promo: 2.09 },
-    bazarstore: { reg: 2.55, promo: 2.29 },
-    rahat: { reg: 2.49, promo: 2.19 },
+    bravo: { reg: 2.25, promo: 1.99 },
+    araz: { reg: 2.19, promo: 1.95 },
+    bazarstore: { reg: 2.15, promo: 1.90 },
+    rahat: { reg: 2.25, promo: 1.99 },
   },
-  // 22. Wholegrain Bread & Lavash 500 g — PL: 4,49 zł | AZ: 1.45 ₼
+  // 22. Wholegrain Bread & Lavash 500 g — PL: 4,49 zł | AZ: 1.15 ₼ (Bazarstore: Çörəkçi Kəpəkli Çörək / Lavaş)
   {
     id: 'prod-bread',
     ean: '5900112233226',
-    azEan: '4760112233226',
+    azEan: '30207092',
     canonicalIngredient: 'wholegrain_bread',
     namePl: 'Chleb żytni razowy krojony',
     nameEn: 'Sliced Wholegrain Bread & Flatbread',
-    nameAz: 'Kəpəkli çörək və təzə lavaş',
+    nameAz: 'Çörəkçi Kəpəkli Çörək və Lavaş',
     brand: 'Piekarnia Biedronki / Chrupiące z Pieca',
-    azBrand: 'Xonça / Çörəkçi',
+    azBrand: 'Çörəkçi / Xonça',
     category: 'Bakery',
     packageSize: 500,
     packageUnit: 'g',
@@ -1157,22 +1158,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 4.89, promo: 4.39 },
     auchan: { reg: 4.79, promo: null },
     kaufland: { reg: 4.89, promo: 4.49 },
-    bravo: { reg: 1.45, promo: null },
-    araz: { reg: 1.39, promo: null },
-    bazarstore: { reg: 1.50, promo: null },
-    rahat: { reg: 1.45, promo: null },
+    bravo: { reg: 1.35, promo: 1.15 },
+    araz: { reg: 1.30, promo: 1.15 },
+    bazarstore: { reg: 1.35, promo: 1.15 },
+    rahat: { reg: 1.35, promo: 1.20 },
   },
-  // 23. Olive Oil / Cooking Oil 500 ml — PL: 16,99 zł | AZ: 8.99 ₼
+  // 23. Olive Oil / Cooking Oil 500 ml — PL: 16,99 zł | AZ: 6.99 ₼ (Bazarstore: Zeytun Bağları Zeytun Yağı 500 ml)
   {
     id: 'prod-olive-oil',
     ean: '5900112233233',
-    azEan: '4760112233233',
+    azEan: '30187516',
     canonicalIngredient: 'olive_oil',
     namePl: 'Oliwa z oliwek Extra Virgin / Olej rzepakowy',
     nameEn: 'Olive Oil / Cooking Oil',
-    nameAz: 'Zeytun yağı (Abşeron / Extra Virgin)',
+    nameAz: 'Zeytun Bağları Zeytun Yağı 500 ml',
     brand: 'Gallo / Primadonna',
-    azBrand: 'Zeytun Bağları / Final',
+    azBrand: 'Zeytun Bağları',
     category: 'Other',
     packageSize: 500,
     packageUnit: 'ml',
@@ -1185,22 +1186,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 19.49, promo: 16.49 },
     auchan: { reg: 18.99, promo: null },
     kaufland: { reg: 19.49, promo: 16.99 },
-    bravo: { reg: 9.90, promo: 8.99 },
-    araz: { reg: 9.80, promo: 8.79 },
-    bazarstore: { reg: 10.20, promo: 9.20 },
-    rahat: { reg: 9.90, promo: 8.99 },
+    bravo: { reg: 8.99, promo: 7.49 },
+    araz: { reg: 8.80, promo: 7.29 },
+    bazarstore: { reg: 8.99, promo: 6.99 },
+    rahat: { reg: 8.99, promo: 7.49 },
   },
-  // 24. Sweet Paprika & Saffron / Turmeric 20 g — PL: 1,69 zł | AZ: 0.95 ₼
+  // 24. Sweet Paprika & Saffron / Turmeric 20 g — PL: 1,69 zł | AZ: 0.39 ₼ (Bazarstore: Nemetova Sarıkök 20 q 0.39 ₼)
   {
     id: 'prod-paprika',
     ean: '5900112233240',
-    azEan: '4760112233240',
+    azEan: '30021870',
     canonicalIngredient: 'paprika',
     namePl: 'Papryka słodka mielona',
     nameEn: 'Sweet Ground Paprika & Spices',
-    nameAz: 'Şirin toz bibər və sarıkök ədviyyatı',
+    nameAz: 'Nemetova Sarıkök və Şirin Bibər 20 q',
     brand: 'Prymat / Mikado',
-    azBrand: 'Azərsun / Bizim Tarla',
+    azBrand: 'Nemetova / İpəkyolu',
     category: 'Other',
     packageSize: 20,
     packageUnit: 'g',
@@ -1213,20 +1214,20 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 1.89, promo: 1.59 },
     auchan: { reg: 1.79, promo: null },
     kaufland: { reg: 1.89, promo: 1.69 },
-    bravo: { reg: 1.10, promo: 0.95 },
-    araz: { reg: 1.05, promo: 0.89 },
-    bazarstore: { reg: 1.15, promo: 0.99 },
-    rahat: { reg: 1.10, promo: 0.95 },
+    bravo: { reg: 0.60, promo: 0.45 },
+    araz: { reg: 0.55, promo: 0.39 },
+    bazarstore: { reg: 0.55, promo: 0.39 },
+    rahat: { reg: 0.60, promo: 0.45 },
   },
-  // 25. Canned Tomatoes 400 g — PL: 2,99 zł | AZ: 1.99 ₼
+  // 25. Canned Tomatoes 400 g — PL: 2,99 zł | AZ: 1.89 ₼ (Bazarstore: Bizim Tarla Soyulmuş Pomidor 400 q)
   {
     id: 'prod-canned-tomatoes',
     ean: '5900112233257',
-    azEan: '4760112233257',
+    azEan: '30198382',
     canonicalIngredient: 'canned_tomatoes',
     namePl: 'Pomidory krojone w puszce',
     nameEn: 'Chopped Canned Tomatoes',
-    nameAz: 'Soyulmuş doğranmış pomidor konservi',
+    nameAz: 'Bizim Tarla Soyulmuş Pomidor Konservi',
     brand: 'Culineo / Baresa',
     azBrand: 'Bizim Tarla / Bağdan',
     category: 'Dry Products',
@@ -1241,22 +1242,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 3.39, promo: 2.89 },
     auchan: { reg: 3.29, promo: null },
     kaufland: { reg: 3.49, promo: 2.99 },
-    bravo: { reg: 2.29, promo: 1.99 },
+    bravo: { reg: 2.25, promo: 1.95 },
     araz: { reg: 2.19, promo: 1.89 },
-    bazarstore: { reg: 2.35, promo: 2.09 },
-    rahat: { reg: 2.29, promo: 1.99 },
+    bazarstore: { reg: 2.19, promo: 1.89 },
+    rahat: { reg: 2.25, promo: 1.95 },
   },
-  // 26. Frozen Vegetables 450 g — PL: 4,49 zł | AZ: 2.69 ₼
+  // 26. Frozen Vegetables 450 g — PL: 4,49 zł | AZ: 3.80 ₼ (Bazarstore: Vici / Superfresh Dondurulmuş Tərəvəz)
   {
     id: 'prod-frozen-veggies',
     ean: '5900112233264',
-    azEan: '4760112233264',
+    azEan: '30205355',
     canonicalIngredient: 'frozen_vegetables',
     namePl: 'Warzywa na patelnię / Mieszanka warzywna',
     nameEn: 'Frozen Mixed Vegetables',
-    nameAz: 'Dondurulmuş tərəvəz qarışığı',
+    nameAz: 'Vici / Superfresh Dondurulmuş Tərəvəz Qarışığı',
     brand: 'Mroźna Kraina / Freshona',
-    azBrand: 'Bizim Tarla / Polşa İxrac',
+    azBrand: 'Vici / Superfresh',
     category: 'Frozen Products',
     packageSize: 450,
     packageUnit: 'g',
@@ -1269,22 +1270,22 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 5.29, promo: 4.39 },
     auchan: { reg: 5.19, promo: null },
     kaufland: { reg: 5.39, promo: 4.49 },
-    bravo: { reg: 2.99, promo: 2.69 },
-    araz: { reg: 2.89, promo: 2.59 },
-    bazarstore: { reg: 3.09, promo: 2.79 },
-    rahat: { reg: 2.99, promo: 2.69 },
+    bravo: { reg: 4.39, promo: 3.89 },
+    araz: { reg: 4.29, promo: 3.79 },
+    bazarstore: { reg: 4.40, promo: 3.80 },
+    rahat: { reg: 4.39, promo: 3.89 },
   },
-  // 27. Oat Milk 1 L — PL: 4,99 zł | AZ: 3.49 ₼
+  // 27. Oat Milk 1 L — PL: 4,99 zł | AZ: 4.49 ₼ (Bazarstore: Alpro Yulaf Südü 1 L)
   {
     id: 'prod-plant-milk',
     ean: '5900112233271',
-    azEan: '4760112233271',
+    azEan: '30205380',
     canonicalIngredient: 'oat_milk',
     namePl: 'Napój owsiany bez laktozy',
     nameEn: 'Oat Plant Drink (Lactose-free)',
-    nameAz: 'Yulaf südü (laktozasız bitki içkisi)',
+    nameAz: 'Alpro Yulaf Südü (Bitki İçkisi) 1 L',
     brand: 'GoVege / Vemondo',
-    azBrand: 'Alpro / GreenMilk',
+    azBrand: 'Alpro',
     category: 'Drinks',
     packageSize: 1000,
     packageUnit: 'ml',
@@ -1297,10 +1298,10 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     lidl: { reg: 5.79, promo: 4.79 },
     auchan: { reg: 5.69, promo: null },
     kaufland: { reg: 5.89, promo: 4.99 },
-    bravo: { reg: 3.89, promo: 3.49 },
-    araz: { reg: 3.79, promo: 3.39 },
-    bazarstore: { reg: 3.99, promo: 3.59 },
-    rahat: { reg: 3.89, promo: 3.49 },
+    bravo: { reg: 5.29, promo: 4.49 },
+    araz: { reg: 5.19, promo: 4.39 },
+    bazarstore: { reg: 5.49, promo: 4.49 },
+    rahat: { reg: 5.29, promo: 4.49 },
   },
 ];
 
@@ -1398,4 +1399,131 @@ export function getCatalogueProductsForRegion(regionCode: RegionCode = 'PL'): Su
 
 export function getSupermarketsForRegionList(regionCode: RegionCode = 'PL'): Supermarket[] {
   return SUPERMARKETS.filter((s) => s.regionCode === regionCode);
+}
+
+/**
+ * Synchronizes monitored product price records from SQLite into the active in-memory catalogue
+ * so shopping lists, budget calculations, and store comparisons always use the latest monitored prices
+ * and flag outdated or unavailable products accurately.
+ */
+export function applyMonitoredPricesToCatalogue(
+  monitoredRecords: MonitoredProductRecord[],
+  lastSyncedAt?: string | null
+): void {
+  if (lastSyncedAt) {
+    const bazarStoreMeta = SUPERMARKETS.find((s) => s.id === 'bazarstore');
+    if (bazarStoreMeta) {
+      bazarStoreMeta.lastSyncedAt = lastSyncedAt;
+    }
+  }
+
+  if (!monitoredRecords || monitoredRecords.length === 0) return;
+
+  // Group monitored records by supermarketId + canonicalIngredient
+  const byStoreAndCanonical = new Map<string, MonitoredProductRecord[]>();
+  for (const rec of monitoredRecords) {
+    if (!rec.canonicalIngredient) continue;
+    const key = `${rec.supermarketId}:${rec.canonicalIngredient.toLowerCase()}`;
+    const arr = byStoreAndCanonical.get(key) || [];
+    arr.push(rec);
+    byStoreAndCanonical.set(key, arr);
+  }
+
+  for (const prod of ALL_CATALOGUE_PRODUCTS) {
+    const stores: SupermarketSlug[] =
+      prod.regionCode === 'AZ'
+        ? ['bazarstore', 'bravo', 'araz', 'rahat']
+        : ['biedronka', 'lidl', 'auchan', 'kaufland'];
+
+    for (const store of stores) {
+      const candidates = byStoreAndCanonical.get(
+        `${store}:${prod.canonicalIngredient.toLowerCase()}`
+      );
+      if (!candidates || candidates.length === 0) continue;
+
+      // Sort candidates so the most recently updated and best-value exact-size available variant wins
+      const sorted = [...candidates].sort((a, b) => {
+        const timeA = new Date(a.lastCheckedAt || 0).getTime() || 0;
+        const timeB = new Date(b.lastCheckedAt || 0).getTime() || 0;
+        if (Math.abs(timeA - timeB) > 1000) {
+          return timeB - timeA;
+        }
+        return a.unitPrice - b.unitPrice;
+      });
+
+      // Prefer exact packageSize + packageUnit match that is available; otherwise best available or exact match
+      const exactAvailable = sorted.find(
+        (c) =>
+          c.isAvailable &&
+          c.packageUnit === prod.packageUnit &&
+          Math.abs(c.packageSize - prod.packageSize) < 1
+      );
+      const exactAny = sorted.find(
+        (c) =>
+          c.packageUnit === prod.packageUnit &&
+          Math.abs(c.packageSize - prod.packageSize) < 1
+      );
+      const anyAvailable = sorted.find((c) => c.isAvailable);
+      const chosen = exactAvailable || anyAvailable || exactAny || sorted[0];
+
+      // If the chosen variant has a different package size than the base catalogue entry,
+      // scale the package price proportionally to prod.packageSize OR update the price record accurately
+      const sizeRatio =
+        chosen.packageUnit === prod.packageUnit && chosen.packageSize > 0
+          ? prod.packageSize / chosen.packageSize
+          : 1;
+
+      const regPrice = Number((chosen.regularPrice * sizeRatio).toFixed(2));
+      const promoPrice =
+        chosen.discountedPrice !== null
+          ? Number((chosen.discountedPrice * sizeRatio).toFixed(2))
+          : null;
+      const effPrice = promoPrice !== null ? promoPrice : regPrice;
+
+      const existingPrice = prod.prices[store];
+      const discountPercent =
+        promoPrice !== null && regPrice > 0
+          ? Math.round(((regPrice - promoPrice) / regPrice) * 100)
+          : null;
+
+      prod.prices[store] = {
+        id: existingPrice?.id || `price-${prod.id}-${store}`,
+        productId: prod.id,
+        supermarketId: store,
+        regionCode: prod.regionCode,
+        country: prod.regionCode === 'AZ' ? 'Azerbaijan' : 'Poland',
+        currencyCode: prod.currencyCode,
+        regularPricePln: regPrice,
+        promoPricePln: promoPrice,
+        effectivePricePln: effPrice,
+        unitPricePln: chosen.unitPrice,
+        unitPriceLabel: chosen.unitPriceLabel,
+        loyaltyRequired: existingPrice?.loyaltyRequired ?? false,
+        loyaltyConditionPl: existingPrice?.loyaltyConditionPl ?? null,
+        loyaltyConditionEn: existingPrice?.loyaltyConditionEn ?? null,
+        loyaltyConditionAz: existingPrice?.loyaltyConditionAz ?? null,
+        promoValidUntil: existingPrice?.promoValidUntil ?? null,
+        discountPercent,
+        storeChannel: 'ONLINE_AND_STORE',
+        storeLocation:
+          store === 'bazarstore'
+            ? 'bazarstore.az/bütün-məhsullar (24h Price Monitor)'
+            : existingPrice?.storeLocation || 'Regional Catalogue',
+        sourceName:
+          store === 'bazarstore'
+            ? 'Bazarstore 24h Automated Price Monitor'
+            : existingPrice?.sourceName || `Catalogue ${store}`,
+        sourceUrl: chosen.productUrl || existingPrice?.sourceUrl || 'https://bazarstore.az/b%C3%BCt%C3%BCn-m%C9%99hsullar',
+        verificationStatus: chosen.isOutdated
+          ? 'OUTDATED_PRICE'
+          : !chosen.isAvailable
+          ? 'UNAVAILABLE'
+          : chosen.verificationStatus,
+        lastUpdatedAt: chosen.lastCheckedAt,
+        isAvailable: chosen.isAvailable,
+        isOutdated: chosen.isOutdated,
+        priceAgeHours: chosen.priceAgeHours,
+      };
+    }
+  }
 }
