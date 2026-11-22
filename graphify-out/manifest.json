@@ -1,0 +1,230 @@
+{
+  "mealplanner/android/app/build.gradle.kts": {
+    "mtime": 1794785739.284067,
+    "seen": 1795390175.6677787,
+    "ast_hash": "8d043346b86c551b6d3be22e85a16bc3",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/bundle.js": {
+    "mtime": 1794792180.4833798,
+    "seen": 1795390175.6677787,
+    "ast_hash": "11f68fa541a7484dc065a273f820c9c0",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/java/pl/mealplanner/app/MainActivity.java": {
+    "mtime": 1794785737.9303796,
+    "seen": 1795390175.6677787,
+    "ast_hash": "de4615125051068192f3bd0304a70f52",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/build.gradle.kts": {
+    "mtime": 1794785740.5949724,
+    "seen": 1795390175.6677787,
+    "ast_hash": "69a69ec1f0a15f7885749fd9f4a3b220",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/settings.gradle.kts": {
+    "mtime": 1794785742.3071184,
+    "seen": 1795390175.6677787,
+    "ast_hash": "ffe100a1223bd7861d981692903316bc",
+    "semantic_hash": ""
+  },
+  "mealplanner/package.json": {
+    "mtime": 1794783636.573786,
+    "seen": 1795390175.6677787,
+    "ast_hash": "6ddaf7c181fc061a3714b6cbc3927dc0",
+    "semantic_hash": ""
+  },
+  "mealplanner/scripts/build-apk.mjs": {
+    "mtime": 1794785778.6591918,
+    "seen": 1795390175.6677787,
+    "ast_hash": "91c0286086653cd435172273005d29cc",
+    "semantic_hash": ""
+  },
+  "mealplanner/scripts/build-client.mjs": {
+    "mtime": 1794785616.3119545,
+    "seen": 1795390175.6677787,
+    "ast_hash": "18f4637e7e28be6a8871f312acfacfff",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/client/MealPlannerApp.tsx": {
+    "mtime": 1794792001.4470034,
+    "seen": 1795390175.6677787,
+    "ast_hash": "0fb9481d51f7a0af5fd08bf0550f11ff",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/client/api/clientApi.ts": {
+    "mtime": 1794788935.8252873,
+    "seen": 1795390175.6677787,
+    "ast_hash": "a2ca2e7ba5cdab179368063311e51951",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/client/components/AiPlanWizardModal.tsx": {
+    "mtime": 1794786867.3582969,
+    "seen": 1795390175.6677787,
+    "ast_hash": "9d69f76127a656ce43897609405a0a1c",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/client/components/BrandAssets.tsx": {
+    "mtime": 1794783636.57996,
+    "seen": 1795390175.6677787,
+    "ast_hash": "6c6b138a41a06574fc8c11d1ae36a358",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/client/components/Modals.tsx": {
+    "mtime": 1794792038.3379247,
+    "seen": 1795390175.6677787,
+    "ast_hash": "47896840ac25b1d6924d837f65d64535",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/client/main.tsx": {
+    "mtime": 1794783636.5812147,
+    "seen": 1795390175.6677787,
+    "ast_hash": "143b50c7792f90d6f3e354249c438eb4",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/ai/aiMealPlanner.ts": {
+    "mtime": 1794785075.397435,
+    "seen": 1795390175.6677787,
+    "ast_hash": "f567cf299e330478f5c2c85c3212d9ea",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/app.ts": {
+    "mtime": 1794788569.844237,
+    "seen": 1795390175.6677787,
+    "ast_hash": "52370c095aad78883a9a289b454a656c",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/auth/authService.ts": {
+    "mtime": 1794783636.585098,
+    "seen": 1795390175.6677787,
+    "ast_hash": "f999f20c4d4eca99fa7076ca38430f83",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/budget/budgetOptimizer.ts": {
+    "mtime": 1794783636.5861762,
+    "seen": 1795390175.6677787,
+    "ast_hash": "32828ea9ef93780fe7390c11012e7f02",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/db/database.ts": {
+    "mtime": 1794791902.0474226,
+    "seen": 1795390175.6677787,
+    "ast_hash": "ecb482f4c1b29e60588f387247f65746",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/index.ts": {
+    "mtime": 1794788533.5843248,
+    "seen": 1795390175.6677787,
+    "ast_hash": "eded0528fec290757f4356dc39de1af0",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/matching/quantityEngine.ts": {
+    "mtime": 1794788168.0888422,
+    "seen": 1795390175.6677787,
+    "ast_hash": "24dc0491286f423696b250335db1de2d",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/monitoring/bazarstoreMonitor.ts": {
+    "mtime": 1794792153.0813963,
+    "seen": 1795390175.6677787,
+    "ast_hash": "d96e35400963d0fb4ead694183b6de97",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/recipes/recipeSeedData.ts": {
+    "mtime": 1794791343.330871,
+    "seen": 1795390175.6677787,
+    "ast_hash": "38d8170f91800dc4855cece7e4b18d9f",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/supermarkets/catalogueData.ts": {
+    "mtime": 1794791641.227266,
+    "seen": 1795390175.6677787,
+    "ast_hash": "c2b360cb8939900531ce34cd6874026c",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/supermarkets/supermarketService.ts": {
+    "mtime": 1794783636.591092,
+    "seen": 1795390175.6677787,
+    "ast_hash": "c8194f05f78c4d619b6b9897700907e0",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/validation/mealValidator.ts": {
+    "mtime": 1794783636.5924456,
+    "seen": 1795390175.6677787,
+    "ast_hash": "3da160c55f7a787f8adb1504806b03e2",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/shared/i18n.ts": {
+    "mtime": 1794786817.6029975,
+    "seen": 1795390175.6677787,
+    "ast_hash": "a510e0e3b9dc1a7fe2c3f22ba16e6bb6",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/shared/recipeGuide.ts": {
+    "mtime": 1794786819.7970054,
+    "seen": 1795390175.6677787,
+    "ast_hash": "8707653f626e6a4fc104f5449f853a07",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/shared/regionConfig.ts": {
+    "mtime": 1794791942.542761,
+    "seen": 1795390175.6677787,
+    "ast_hash": "d203e5263b5d5c6ed24479653e3f1ee7",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/shared/types.ts": {
+    "mtime": 1794788026.21061,
+    "seen": 1795390175.6677787,
+    "ast_hash": "a8eadfa4dd46d57d6e48fc14872da4d2",
+    "semantic_hash": ""
+  },
+  "mealplanner/tests/api.integration.test.ts": {
+    "mtime": 1794788875.0785675,
+    "seen": 1795390175.6677787,
+    "ast_hash": "472d99ecef1279d159c74bbe4ff16ef4",
+    "semantic_hash": ""
+  },
+  "mealplanner/tests/mealplanner.test.ts": {
+    "mtime": 1794792093.5301232,
+    "seen": 1795390175.6677787,
+    "ast_hash": "70803c195450fe7d6ba99c5da49a0a02",
+    "semantic_hash": ""
+  },
+  "mealplanner/tsconfig.json": {
+    "mtime": 1794783636.596841,
+    "seen": 1795390175.6677787,
+    "ast_hash": "aa9aec668f190e8b66976794efbc9a47",
+    "semantic_hash": ""
+  },
+  "mealplanner/GOOGLE_PLAY_COMPLIANCE.md": {
+    "mtime": 1794785881.7391925,
+    "seen": 1795390175.6677787,
+    "ast_hash": "2228674aceff1a32c4366affa58c05ab",
+    "semantic_hash": ""
+  },
+  "mealplanner/README.md": {
+    "mtime": 1794783633.4549122,
+    "seen": 1795390175.6677787,
+    "ast_hash": "4344c5533db4708c55902a2aab4684ea",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/index.html": {
+    "mtime": 1794792180.4833798,
+    "seen": 1795390175.6677787,
+    "ast_hash": "c973d37a526ac96125fbef27271502ae",
+    "semantic_hash": ""
+  },
+  "mealplanner/readme.txt": {
+    "mtime": 1794783636.573786,
+    "seen": 1795390175.6677787,
+    "ast_hash": "76cce3edcbd9326c771add481d9498cf",
+    "semantic_hash": ""
+  },
+  "mealplanner/package-lock.json": {
+    "mtime": 1794783636.5724921,
+    "seen": 1795390175.6677787,
+    "ast_hash": "2ea95069f5b368d2f1e4a04499106162",
+    "semantic_hash": ""
+  }
+}
