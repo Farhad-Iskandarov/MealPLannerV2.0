@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Server } from 'node:http';
-import { rmSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MealPlannerDatabase } from '../src/server/db/database';
 import { createApp } from '../src/server/app';
 
@@ -161,24 +162,26 @@ describe('MealPlanner HTTP REST API & Security Integration Tests', () => {
   });
 
   it('executes the complete 17-step End-to-End User Journey with persistent disk SQLite verification', async () => {
-    const tempDbFile = resolve(process.cwd(), 'data/e2e-journey-test.sqlite');
-    if (existsSync(tempDbFile)) rmSync(tempDbFile, { force: true });
+    const tempDir = mkdtempSync(join(tmpdir(), 'mealplanner-e2e-journey-'));
+    const tempDbFile = join(tempDir, 'e2e-journey-test.sqlite');
 
-    const diskDb = new MealPlannerDatabase(tempDbFile);
-    await diskDb.seedIfEmpty();
-    const e2eApp = createApp(diskDb);
-
-    let e2eServer!: Server;
+    let diskDb: MealPlannerDatabase | null = null;
+    let reopenedDb: MealPlannerDatabase | null = null;
+    let e2eServer: Server | null = null;
     let e2eUrl = '';
-    await new Promise<void>((res) => {
-      e2eServer = e2eApp.listen(0, '127.0.0.1', () => {
-        const addr = e2eServer.address() as { port: number };
-        e2eUrl = `http://127.0.0.1:${addr.port}`;
-        res();
-      });
-    });
 
     try {
+      diskDb = new MealPlannerDatabase(tempDbFile);
+      await diskDb.seedIfEmpty();
+      const e2eApp = createApp(diskDb);
+
+      e2eServer = await new Promise<Server>((res) => {
+        const srv = e2eApp.listen(0, '127.0.0.1', () => {
+          const addr = srv.address() as { port: number };
+          e2eUrl = `http://127.0.0.1:${addr.port}`;
+          res(srv);
+        });
+      });
       // Steps 1–5: Register a new user account, complete onboarding, set 250 PLN weekly budget,
       // select Biedronka, and choose a high-protein diet
       const regRes = await fetch(`${e2eUrl}/api/auth/register`, {
@@ -292,10 +295,13 @@ describe('MealPlanner HTTP REST API & Security Integration Tests', () => {
       }
 
       // Step 14: Mark products as purchased
+      const keyToToggle =
+        afterPantryState.shoppingList.items.find((i: any) => i.canonicalIngredient === 'chicken_breast')
+          ?.canonicalIngredient || afterPantryState.shoppingList.items[0].canonicalIngredient;
       const toggleRes = await fetch(`${e2eUrl}/api/shopping-list/toggle`, {
         method: 'POST',
         headers: authHeaders,
-        body: JSON.stringify({ key: 'chicken_breast' }),
+        body: JSON.stringify({ key: keyToToggle }),
       });
       expect(toggleRes.status).toBe(200);
       const afterToggle = await toggleRes.json();
@@ -306,10 +312,17 @@ describe('MealPlanner HTTP REST API & Security Integration Tests', () => {
       expect(afterToggle.budgetAnalysis.weeklyBudgetPln).toBe(250);
 
       // Steps 16–17: Close the database/server, reopen from disk, and verify all data persists
-      await new Promise<void>((res) => e2eServer.close(() => res()));
-      diskDb.db.close();
+      if (e2eServer) {
+        const srv = e2eServer;
+        e2eServer = null;
+        await new Promise<void>((res) => srv.close(() => res()));
+      }
+      if (diskDb) {
+        diskDb.db.close();
+        diskDb = null;
+      }
 
-      const reopenedDb = new MealPlannerDatabase(tempDbFile);
+      reopenedDb = new MealPlannerDatabase(tempDbFile);
       const persistedUser = reopenedDb.getUserByEmail('anna.nowak@mealplanner.pl');
       expect(persistedUser?.user.displayName).toBe('Anna Nowak');
       expect(persistedUser?.user.preferences.dietaryRestrictions).toContain('high_protein');
@@ -321,34 +334,53 @@ describe('MealPlanner HTTP REST API & Security Integration Tests', () => {
       const persistedList = reopenedDb.getShoppingList(persistedUser!.user.id);
       expect(persistedList.boughtCount).toBeGreaterThanOrEqual(1);
       reopenedDb.db.close();
+      reopenedDb = null;
     } finally {
-      try {
-        if (existsSync(tempDbFile)) rmSync(tempDbFile, { force: true });
-      } catch {
-        // ignore cleanup lock on Windows if any
+      if (e2eServer) {
+        await new Promise<void>((res) => e2eServer!.close(() => res()));
+        e2eServer = null;
       }
+      if (diskDb) {
+        try {
+          diskDb.db.close();
+        } catch {
+          // already closed
+        }
+        diskDb = null;
+      }
+      if (reopenedDb) {
+        try {
+          reopenedDb.db.close();
+        } catch {
+          // already closed
+        }
+        reopenedDb = null;
+      }
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
   it('Scenario A, B, C, D, E — Multi-Region (Poland & Azerbaijan), Currency (PLN & AZN), and Language (EN, PL, AZ) HTTP API & Persistence Verification', async () => {
-    const tempRegionDb = resolve(process.cwd(), 'data/e2e-region-test.sqlite');
-    if (existsSync(tempRegionDb)) rmSync(tempRegionDb, { force: true });
+    const tempRegionDir = mkdtempSync(join(tmpdir(), 'mealplanner-e2e-region-'));
+    const tempRegionDb = join(tempRegionDir, 'e2e-region-test.sqlite');
 
-    const rDb = new MealPlannerDatabase(tempRegionDb);
-    await rDb.seedIfEmpty();
-    const rApp = createApp(rDb);
-
-    let rServer!: Server;
+    let rDb: MealPlannerDatabase | null = null;
+    let reopened: MealPlannerDatabase | null = null;
+    let rServer: Server | null = null;
     let rUrl = '';
-    await new Promise<void>((res) => {
-      rServer = rApp.listen(0, '127.0.0.1', () => {
-        const addr = rServer.address() as { port: number };
-        rUrl = `http://127.0.0.1:${addr.port}`;
-        res();
-      });
-    });
 
     try {
+      rDb = new MealPlannerDatabase(tempRegionDb);
+      await rDb.seedIfEmpty();
+      const rApp = createApp(rDb);
+
+      rServer = await new Promise<Server>((res) => {
+        const srv = rApp.listen(0, '127.0.0.1', () => {
+          const addr = srv.address() as { port: number };
+          rUrl = `http://127.0.0.1:${addr.port}`;
+          res(srv);
+        });
+      });
       // 1. Register a new user in Azerbaijan with Azerbaijani language and Bravo supermarket
       const regRes = await fetch(`${rUrl}/api/auth/register`, {
         method: 'POST',
@@ -420,14 +452,7 @@ describe('MealPlanner HTTP REST API & Security Integration Tests', () => {
       expect(plBody.user.regionCode).toBe('PL');
       expect(plBody.user.currencyCode).toBe('PLN');
       expect(plBody.user.preferences.preferredSupermarket).toBe('biedronka');
-      expect(plBody.supermarkets.map((s: any) => s.id)).toEqual([
-        'biedronka',
-        'lidl',
-        'auchan',
-        'kaufland',
-        'carrefour',
-        'zabka',
-      ]);
+      expect(plBody.supermarkets.map((s: any) => s.id)).toEqual(['biedronka']);
       expect(plBody.weeklyPlan.meals.length).toBe(21);
 
       // 5. Switch back to Azerbaijan + Azerbaijani language and verify persistence across DB reopen (Scenario D)
@@ -437,22 +462,46 @@ describe('MealPlanner HTTP REST API & Security Integration Tests', () => {
         body: JSON.stringify({ regionCode: 'AZ', language: 'az', preferredSupermarket: 'bazarstore' }),
       });
 
-      await new Promise<void>((res) => rServer.close(() => res()));
-      rDb.db.close();
+      if (rServer) {
+        const srv = rServer;
+        rServer = null;
+        await new Promise<void>((res) => srv.close(() => res()));
+      }
+      if (rDb) {
+        rDb.db.close();
+        rDb = null;
+      }
 
-      const reopened = new MealPlannerDatabase(tempRegionDb);
+      reopened = new MealPlannerDatabase(tempRegionDb);
       const persisted = reopened.getUserByEmail('leyla.mammadova@baku.az');
       expect(persisted?.user.regionCode).toBe('AZ');
       expect(persisted?.user.currencyCode).toBe('AZN');
       expect(persisted?.user.language).toBe('az');
       expect(persisted?.user.preferences.preferredSupermarket).toBe('bazarstore');
       reopened.db.close();
+      reopened = null;
     } finally {
-      try {
-        if (existsSync(tempRegionDb)) rmSync(tempRegionDb, { force: true });
-      } catch {
-        // ignore cleanup lock on Windows
+      if (rServer) {
+        await new Promise<void>((res) => rServer!.close(() => res()));
+        rServer = null;
       }
+      if (rDb) {
+        try {
+          rDb.db.close();
+        } catch {
+          // already closed
+        }
+        rDb = null;
+      }
+      if (reopened) {
+        try {
+          reopened.db.close();
+        } catch {
+          // already closed
+        }
+        reopened = null;
+      }
+      rmSync(tempRegionDir, { recursive: true, force: true });
     }
   });
 
@@ -481,7 +530,8 @@ describe('MealPlanner HTTP REST API & Security Integration Tests', () => {
     expect(wizRes.status).toBe(200);
     const body = await wizRes.json();
     expect(body.weeklyPlan.planDurationDays).toBe(5);
-    expect(body.weeklyPlan.supermarketId).toBe('auchan');
+    // Legacy PL store selection ('auchan') is coerced to 'biedronka' (only available Polish store)
+    expect(body.weeklyPlan.supermarketId).toBe('biedronka');
     expect(body.weeklyPlan.householdSize).toBe(3);
     expect(body.weeklyPlan.meals.length).toBe(15); // 5 days x 3 meals (breakfast, lunch, dinner)
     expect(body.user.preferences.foodVibes).toEqual(['quick_easy', 'high_protein', 'mediterranean']);
@@ -492,11 +542,24 @@ describe('MealPlanner HTTP REST API & Security Integration Tests', () => {
       expect(m.recipe.id).not.toBe('rec-pork-loin-potatoes');
       expect(m.recipe.id).not.toBe('rec-baked-salmon-broccoli');
     }
-    expect(body.shoppingList.supermarketId).toBe('auchan');
+    expect(body.shoppingList.supermarketId).toBe('biedronka');
     expect(body.shoppingList.items.length).toBeGreaterThan(0);
   });
 
   it('synchronizes Recipe Details servings and ingredient quantity edits with the shopping list and budget via PATCH /api/recipes/:id/servings and /ingredient', async () => {
+    // Ensure rec-grilled-chicken-rice is on day 0 lunch regardless of previous wizard test seed
+    const placeRes = await fetch(`${baseUrl}/api/meal-plan/meal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dayIndex: 0,
+        mealType: 'lunch',
+        recipeId: 'rec-grilled-chicken-rice',
+        servings: 2,
+      }),
+    });
+    expect(placeRes.status).toBe(200);
+
     const srvRes = await fetch(`${baseUrl}/api/recipes/rec-grilled-chicken-rice/servings`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

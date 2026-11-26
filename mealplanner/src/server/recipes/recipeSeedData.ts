@@ -1,5 +1,6 @@
 import { Recipe, RecipeIngredient } from '../../shared/types';
 import { normalizeIngredientQuantity } from '../matching/quantityEngine';
+import { CUISINE_SEED_RECIPES } from './cuisineRecipesData';
 
 const CANONICAL_AZ_NAMES: Record<string, string> = {
   chicken_breast: 'Toyuq döş əti (file)',
@@ -78,6 +79,8 @@ function ing(
   };
 }
 
+const PLACEHOLDER_RECIPE_IMG = './assets/recipes/recipe-placeholder.svg';
+
 export const SEED_RECIPES: Recipe[] = [
   // === 1. Exact Reference Recipe: Grilled Chicken with Rice (Screen 2 & Screen 3) ===
   {
@@ -96,7 +99,7 @@ export const SEED_RECIPES: Recipe[] = [
     mealType: 'lunch',
     category: 'High-protein',
     regionSuitability: ['PL', 'AZ'],
-    imageUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1532550907401-a500c9a57435?auto=format&fit=crop&w=800&q=80',
     prepTimeMin: 10,
     cookTimeMin: 15,
     totalTimeMin: 25,
@@ -164,7 +167,7 @@ export const SEED_RECIPES: Recipe[] = [
     mealType: 'breakfast',
     category: 'Budget-friendly',
     regionSuitability: ['PL', 'AZ'],
-    imageUrl: 'https://images.unsplash.com/photo-1517673132405-a56a62b18caf?auto=format&fit=crop&w=800&q=80',
+    imageUrl: './assets/recipes/oatmeal-banana.webp',
     prepTimeMin: 2,
     cookTimeMin: 3,
     totalTimeMin: 5,
@@ -224,6 +227,7 @@ export const SEED_RECIPES: Recipe[] = [
       'Kök, kartof, brokoli və pomidorla hazırlanmış yüngül və faydalı ev üsulu tərəvəz şorbası.',
     mealType: 'dinner',
     category: 'Vegetarian',
+    cuisine: 'polish',
     regionSuitability: ['PL', 'AZ'],
     imageUrl: 'https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=800&q=80',
     prepTimeMin: 8,
@@ -329,8 +333,9 @@ export const SEED_RECIPES: Recipe[] = [
     descriptionAz: 'Qatıqla qarışdırılmış təzə kəsmik, tam taxıllı çörək və Quba alması ilə sürətli səhər yeməyi.',
     mealType: 'breakfast',
     category: 'Quick meals',
+    cuisine: 'polish',
     regionSuitability: ['PL', 'AZ'],
-    imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=800&q=80',
+    imageUrl: './assets/recipes/polish-cottage-cheese-toast.webp',
     prepTimeMin: 6,
     cookTimeMin: 0,
     totalTimeMin: 6,
@@ -377,7 +382,7 @@ export const SEED_RECIPES: Recipe[] = [
     mealType: 'breakfast',
     category: 'Vegetarian',
     regionSuitability: ['PL', 'AZ'],
-    imageUrl: 'https://images.unsplash.com/photo-1495214783159-3503fd1b572d?auto=format&fit=crop&w=800&q=80',
+    imageUrl: './assets/recipes/vegan-apple-banana-porridge.webp',
     prepTimeMin: 4,
     cookTimeMin: 6,
     totalTimeMin: 10,
@@ -423,8 +428,9 @@ export const SEED_RECIPES: Recipe[] = [
     descriptionAz: 'Sarımsaqla ədviyyatlandırılmış yumşaq ət dilimləri, kartof və köklə birlikdə.',
     mealType: 'lunch',
     category: 'Budget-friendly',
+    cuisine: 'polish',
     regionSuitability: ['PL'],
-    imageUrl: 'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=800&q=80',
+    imageUrl: './assets/recipes/polish-herb-roasted-pork-loin.webp',
     prepTimeMin: 10,
     cookTimeMin: 25,
     totalTimeMin: 35,
@@ -472,7 +478,7 @@ export const SEED_RECIPES: Recipe[] = [
     mealType: 'lunch',
     category: 'Budget-friendly',
     regionSuitability: ['PL', 'AZ'],
-    imageUrl: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=800&q=80',
+    imageUrl: './assets/recipes/red-lentil-tomato-stew-rice.webp',
     prepTimeMin: 5,
     cookTimeMin: 15,
     totalTimeMin: 20,
@@ -653,6 +659,7 @@ export const SEED_RECIPES: Recipe[] = [
     id: 'rec-pasta-lentil-bolognese',
     slug: 'lentil-bolognese-pasta',
     authorUserId: null,
+    cuisine: 'italian',
     titlePl: 'Makaron z sosem bolognese z soczewicy',
     titleEn: 'Wholegrain Pasta with Lentil Bolognese',
     titleAz: 'Mərcimək souslu makaron',
@@ -792,6 +799,7 @@ export const SEED_RECIPES: Recipe[] = [
     id: 'rec-az-shah-plov',
     slug: 'azerbaijani-chicken-plov',
     authorUserId: null,
+    cuisine: 'azerbaijani',
     titlePl: 'Azerbejdżański pilaw z kurczakiem (Toyuqlu Plov)',
     titleEn: 'Azerbaijani Saffron Chicken Plov (Toyuqlu Plov)',
     titleAz: 'Toyuqlu Azərbaycan Plovu',
@@ -843,6 +851,7 @@ export const SEED_RECIPES: Recipe[] = [
     id: 'rec-az-dovga',
     slug: 'azerbaijani-dovga-yogurt-herb-soup',
     authorUserId: null,
+    cuisine: 'azerbaijani',
     titlePl: 'Tradycyjna zupa jogurtowa z ziołami (Azərbaycan Dovğası)',
     titleEn: 'Traditional Azerbaijani Yogurt & Herb Soup (Dovğa)',
     titleAz: 'Ənənəvi Göyərtili Dovğa',
@@ -855,7 +864,7 @@ export const SEED_RECIPES: Recipe[] = [
     mealType: 'dinner',
     category: 'Vegetarian',
     regionSuitability: ['AZ', 'PL'],
-    imageUrl: 'https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=800&q=80',
+    imageUrl: './assets/recipes/azerbaijani-dovga.webp',
     prepTimeMin: 6,
     cookTimeMin: 12,
     totalTimeMin: 18,
@@ -893,6 +902,7 @@ export const SEED_RECIPES: Recipe[] = [
     id: 'rec-az-qutab',
     slug: 'azerbaijani-greens-qutab',
     authorUserId: null,
+    cuisine: 'azerbaijani',
     titlePl: 'Azerbejdżańskie placki Qutab ze szpinakiem i twarogiem',
     titleEn: 'Azerbaijani Greens & Cottage Cheese Qutab',
     titleAz: 'Göyərtili və Kəsmikli Qutab (Qatıqla)',
@@ -905,7 +915,7 @@ export const SEED_RECIPES: Recipe[] = [
     mealType: 'dinner',
     category: 'Quick meals',
     regionSuitability: ['AZ', 'PL'],
-    imageUrl: 'https://images.unsplash.com/photo-1565299585323-38d6b0865b47?auto=format&fit=crop&w=800&q=80',
+    imageUrl: './assets/recipes/azerbaijani-qutab.webp',
     prepTimeMin: 8,
     cookTimeMin: 8,
     totalTimeMin: 16,
@@ -943,6 +953,7 @@ export const SEED_RECIPES: Recipe[] = [
     id: 'rec-az-pomidor-yumurta',
     slug: 'azerbaijani-pomidor-yumurta',
     authorUserId: null,
+    cuisine: 'azerbaijani',
     titlePl: 'Azerbejdżańska jajecznica na soczystych pomidorach (Pomidor-Yumurta)',
     titleEn: 'Azerbaijani Tomato & Egg Skillet (Pomidor-Yumurta)',
     titleAz: 'Pomidor-Yumurta Çığırtması',
@@ -987,4 +998,5 @@ export const SEED_RECIPES: Recipe[] = [
     ],
     isCustom: false,
   },
+  ...CUISINE_SEED_RECIPES,
 ];

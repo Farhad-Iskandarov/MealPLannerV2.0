@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Home,
   Calendar,
@@ -40,8 +40,16 @@ import {
   Recipe,
   RegionCode,
   ShoppingCategory,
+  ShoppingItem,
   SupermarketSlug,
+  BiedronkaProductDetail,
 } from '../shared/types';
+import { formatWarsawObservationTimestamp } from '../shared/dateFormat';
+import {
+  isRegularPriceOnlyPolicyActive,
+  resolvePolicyEffectivePrice,
+  shouldShowPromoIndicators,
+} from '../shared/pricingPolicy';
 import {
   CURRENCIES,
   REGIONS,
@@ -62,7 +70,11 @@ import {
 } from '../shared/recipeGuide';
 import { AppStatePayload, clientApi, setAuthToken } from './api/clientApi';
 import { AndroidStatusBar, ChefHatLogo, SupermarketLogo } from './components/BrandAssets';
-import { ActiveModalType, AppModals } from './components/Modals';
+import {
+  ActiveModalType,
+  AppModals,
+  BiedronkaProductDetailModal,
+} from './components/Modals';
 
 export type NavTab = 'home' | 'meal_plan' | 'recipes' | 'shopping' | 'profile';
 
@@ -137,6 +149,19 @@ function getStoreDisplayName(slug: SupermarketSlug): string {
   }
 }
 
+function hasGlovoProduct(item: ShoppingItem): boolean {
+  return item.supermarketId === 'biedronka' &&
+    item.isPriced !== false &&
+    !item.isManual &&
+    Boolean(item.sku && (item.glovoProductId || item.storeProductId || item.externalProductId));
+}
+
+function hasDemoPrice(item: ShoppingItem): boolean {
+  return item.supermarketId === 'biedronka' &&
+    item.isPriced !== false &&
+    /\bdemo\b/i.test(item.sourceName || '');
+}
+
 export const MealPlannerApp: React.FC = () => {
   const [state, setState] = useState<AppStatePayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -157,6 +182,69 @@ export const MealPlannerApp: React.FC = () => {
   });
   const [checkedCookingSteps, setCheckedCookingSteps] = useState<Record<string, boolean>>({});
   const [recipeServingsOverride, setRecipeServingsOverride] = useState<number>(2);
+  const [selectedBiedronkaItem, setSelectedBiedronkaItem] = useState<ShoppingItem | null>(null);
+  const [selectedBiedronkaDetail, setSelectedBiedronkaDetail] =
+    useState<BiedronkaProductDetail | null>(null);
+  const [biedronkaDetailLoading, setBiedronkaDetailLoading] = useState(false);
+  const productDetailRequest = useRef(0);
+
+  const handleOpenBiedronkaProductDetail = async (item: ShoppingItem) => {
+    const requestId = ++productDetailRequest.current;
+    const canFetchDetail = hasGlovoProduct(item);
+    const pkgCount = Math.max(1, item.recommendedPackages || 1);
+    const linePackPrice = Number((item.lineTotalPln / pkgCount).toFixed(2));
+    const regularPackPrice = Number((item.regularLineTotalPln / pkgCount).toFixed(2));
+    const promoPackPrice =
+      regularPackPrice > linePackPrice + 0.005 ? linePackPrice : null;
+    const effectivePackPrice = resolvePolicyEffectivePrice(
+      regularPackPrice || linePackPrice,
+      promoPackPrice,
+      item.regionCode || activeRegion,
+      item.supermarketId
+    );
+
+    setSelectedBiedronkaItem(item);
+    setBiedronkaDetailLoading(canFetchDetail);
+    setSelectedBiedronkaDetail({
+      sku: String(item.sku || ''),
+      productId: item.glovoProductId ?? null,
+      externalProductId: item.externalProductId ?? null,
+      storeProductId: item.storeProductId ?? null,
+      storeId: null,
+      storeAddressId: null,
+      storeSlug: 'biedronka-waw',
+      sourceName: item.sourceName || getStoreDisplayName(item.supermarketId),
+      storeLocation: item.storeLocation || '',
+      namePl: canFetchDetail
+        ? item.matchedProductNamePl || item.namePl
+        : pickLocalizedText(lang, { en: item.nameEn, pl: item.namePl, az: item.nameAz }),
+      packageLabelPl: item.packageSizeLabel || null,
+      regularPricePln: regularPackPrice || effectivePackPrice,
+      promoPricePln: promoPackPrice,
+      effectivePricePln: effectivePackPrice,
+      priceObservedAt: item.priceObservedAt ?? null,
+      imageUrl: null,
+      glovoProductUrl: item.glovoProductUrl ?? null,
+      description: null,
+      ingredients: null,
+      nutritionBasis: null,
+      nutritionRows: [],
+      countryOfOrigin: null,
+      detailStatus: 'OK',
+      detailError: null,
+      retryAfterAt: null,
+      detailFetchedAt: null,
+      fromCache: false,
+    });
+
+    if (!canFetchDetail) return;
+    try {
+      const detail = await clientApi.fetchBiedronkaProductDetail(item);
+      if (productDetailRequest.current === requestId) setSelectedBiedronkaDetail(detail);
+    } finally {
+      if (productDetailRequest.current === requestId) setBiedronkaDetailLoading(false);
+    }
+  };
 
   // Recipe Discovery state
   const [recipeSearch, setRecipeSearch] = useState('');
@@ -575,47 +663,51 @@ export const MealPlannerApp: React.FC = () => {
             </div>
           </div>
 
-          {/* Current Offers Section (Region-aware: Biedronka/Lidl/Auchan in PL, Bravo/Araz/Bazarstore in AZ) */}
-          <div className="mp-section-row">
-            <span className="mp-section-title">{t.currentOffers}</span>
-            <button className="mp-section-link" onClick={() => setActiveModal('price_comparison')}>
-              {t.seeAll}
-            </button>
-          </div>
-          <div className="mp-offers-grid">
-            {state.promotionalOffers.map((offer) => {
-              const isYellow = offer.supermarketId === 'biedronka';
-              return (
-                <button
-                  key={offer.id}
-                  className="mp-offer-card"
-                  style={{
-                    background: offer.cardBgColor,
-                    color: isYellow ? '#1B241E' : '#FFFFFF',
-                  }}
-                  onClick={() => {
-                    handleSelectSupermarket(offer.supermarketId);
-                    setActiveModal('price_comparison');
-                  }}
-                >
-                  <span className="mp-offer-store">{offer.supermarketName}</span>
-                  <img
-                    className="mp-offer-img"
-                    src={offer.imageUrl}
-                    loading="lazy"
-                    decoding="async"
-                    onError={handleMealImageError}
-                    alt={pickLocalizedText(lang, {
-                      en: offer.titleEn,
-                      pl: offer.titlePl,
-                      az: offer.titleAz,
-                    })}
-                  />
-                  <span className="mp-offer-badge">{offer.discountBadge}</span>
+          {/* Current Offers Section (hidden for PL while regular-price-only policy is active; preserved for AZ) */}
+          {shouldShowPromoIndicators(activeRegion) && state.promotionalOffers.length > 0 && (
+            <>
+              <div className="mp-section-row" data-testid="home-current-offers-header">
+                <span className="mp-section-title">{t.currentOffers}</span>
+                <button className="mp-section-link" onClick={() => setActiveModal('price_comparison')}>
+                  {t.seeAll}
                 </button>
-              );
-            })}
-          </div>
+              </div>
+              <div className="mp-offers-grid" data-testid="home-current-offers-grid">
+                {state.promotionalOffers.map((offer) => {
+                  const isYellow = offer.supermarketId === 'biedronka';
+                  return (
+                    <button
+                      key={offer.id}
+                      className="mp-offer-card"
+                      style={{
+                        background: offer.cardBgColor,
+                        color: isYellow ? '#1B241E' : '#FFFFFF',
+                      }}
+                      onClick={() => {
+                        handleSelectSupermarket(offer.supermarketId);
+                        setActiveModal('price_comparison');
+                      }}
+                    >
+                      <span className="mp-offer-store">{offer.supermarketName}</span>
+                      <img
+                        className="mp-offer-img"
+                        src={offer.imageUrl}
+                        loading="lazy"
+                        decoding="async"
+                        onError={handleMealImageError}
+                        alt={pickLocalizedText(lang, {
+                          en: offer.titleEn,
+                          pl: offer.titlePl,
+                          az: offer.titleAz,
+                        })}
+                      />
+                      <span className="mp-offer-badge">{offer.discountBadge}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           {/* Select Supermarket Section (Active Region's 4 Catalogue Stores) */}
           <div className="mp-section-row">
@@ -692,13 +784,26 @@ export const MealPlannerApp: React.FC = () => {
                 {t.estimatedCost}:{' '}
                 <strong style={{ color: '#1B241E' }}>
                   {formatPln(displayBasketCost, activeCurrency)}
+                  {state.shoppingList.hasIncompleteTotal ? '*' : ''}
                 </strong>
               </span>
               <span>
-                {displayRemaining >= 0 ? t.remainingBudget : t.overBudget}:{' '}
-                <strong style={{ color: displayRemaining >= 0 ? '#15803D' : '#DC2626' }}>
-                  {formatPln(Math.abs(displayRemaining), activeCurrency)}
-                </strong>
+                {state.shoppingList.hasIncompleteTotal ? (
+                  <strong style={{ color: '#B45309' }}>
+                    {pickLocalizedText(lang, {
+                      en: `Incomplete (${state.shoppingList.items.filter((i) => i.isPriced === false).length} unpriced)`,
+                      pl: `Niepełna suma (${state.shoppingList.items.filter((i) => i.isPriced === false).length} bez ceny)`,
+                      az: `Natamam cəm (${state.shoppingList.items.filter((i) => i.isPriced === false).length} qiymətsiz)`,
+                    })}
+                  </strong>
+                ) : (
+                  <>
+                    {displayRemaining >= 0 ? t.remainingBudget : t.overBudget}:{' '}
+                    <strong style={{ color: displayRemaining >= 0 ? '#15803D' : '#DC2626' }}>
+                      {formatPln(Math.abs(displayRemaining), activeCurrency)}
+                    </strong>
+                  </>
+                )}
               </span>
             </div>
             <div
@@ -847,6 +952,31 @@ export const MealPlannerApp: React.FC = () => {
               </span>
             </button>
           </div>
+
+          {((state.weeklyPlan.noSafeRecipeSlots && state.weeklyPlan.noSafeRecipeSlots.length > 0) ||
+            state.weeklyPlan.hasNoSafeRecipes ||
+            state.weeklyPlan.remainingBudgetPln < 0 ||
+            state.shoppingList.hasIncompleteTotal) && (
+            <div
+              role="status"
+              style={{
+                background: '#FFFBEB',
+                border: '1px solid #FDE68A',
+                borderRadius: 14,
+                padding: '10px 12px',
+                marginBottom: 10,
+                fontSize: 11.5,
+                lineHeight: 1.45,
+                color: '#92400E',
+              }}
+            >
+              {pickLocalizedText(lang, {
+                en: state.weeklyPlan.aiGenerationNotesEn,
+                pl: state.weeklyPlan.aiGenerationNotesPl,
+                az: state.weeklyPlan.aiGenerationNotesAz || state.weeklyPlan.aiGenerationNotesEn,
+              })}
+            </div>
+          )}
 
           {dayMeals.length === 0 && (
             <div
@@ -2138,91 +2268,135 @@ export const MealPlannerApp: React.FC = () => {
             <ChevronDown size={17} color="#647067" />
           </div>
 
-          {/* Automated 24h Price Monitoring & Freshness Status Bar */}
-          {(() => {
-            const monitor = state.priceMonitoring;
-            const outdatedCount = allItems.filter((i) => i.isOutdated).length;
-            const lastSyncLabel = monitor?.lastSuccessfulSyncAt
-              ? monitor.lastSuccessfulSyncAt.slice(0, 16).replace('T', ' ')
-              : state.shoppingList.updatedAt.slice(0, 16).replace('T', ' ');
-            return (
-              <div
-                data-testid="shopping-price-monitor-bar"
-                style={{
-                  background: outdatedCount > 0 ? '#FFFBEB' : '#F2F9F4',
-                  border: `1px solid ${outdatedCount > 0 ? '#FDE68A' : '#CBE4D2'}`,
-                  borderRadius: 11,
-                  padding: '6px 9px',
-                  marginBottom: 10,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 6,
-                  fontSize: 10,
-                  color: outdatedCount > 0 ? '#92400E' : '#164A26',
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
+          {/* Regional Price Monitoring & Freshness Status Bar (PL: 5-day Glovo Biedronka; AZ: 24h Bazarstore) */}
+          {activeRegion === 'PL' ? (
+            (() => {
+              const bdSummary = state.biedronkaSnapshot?.summary;
+              const hasActiveSnap = Boolean(bdSummary?.activeSnapshotId);
+              const isStale = Boolean(bdSummary?.isStale);
+              const outdatedCount = allItems.filter((i) => i.isOutdated).length;
+              return (
+                <div
+                  data-testid="shopping-biedronka-status-bar"
+                  style={{
+                    background: outdatedCount > 0 || isStale ? '#FFFBEB' : '#F2F9F4',
+                    border: `1px solid ${outdatedCount > 0 || isStale ? '#FDE68A' : '#CBE4D2'}`,
+                    borderRadius: 11,
+                    padding: '6px 9px',
+                    marginBottom: 10,
+                    fontSize: 10,
+                    color: outdatedCount > 0 || isStale ? '#92400E' : '#164A26',
+                  }}
+                >
                   <div style={{ fontWeight: 800 }}>
-                    {outdatedCount > 0
+                    {hasActiveSnap
                       ? pickLocalizedText(lang, {
-                          en: `⚠️ ${outdatedCount} outdated price(s) (>48h old)`,
-                          pl: `⚠️ ${outdatedCount} nieaktualnych cen (>48h)`,
-                          az: `⚠️ ${outdatedCount} köhnəlmiş qiymət (>48 saat)`,
+                          en: '✓ Biedronka Warsaw (Glovo) • 5-day verified snapshot',
+                          pl: '✓ Biedronka Warszawa (Glovo) • zweryfikowany cennik (co 5 dni)',
+                          az: '✓ Biedronka Varşava (Glovo) • 5 günlük təsdiqlənmiş qiymətlər',
                         })
                       : pickLocalizedText(lang, {
-                          en: '✓ 24h Price Monitor Active (Bazarstore & Regional)',
-                          pl: '✓ Monitoring cen 24h aktywny',
-                          az: '✓ 24s Qiymət Monitorinqi Aktivdir (Bazarstore)',
+                          en: 'ℹ️ Biedronka Warsaw (Glovo) • Awaiting verified snapshot',
+                          pl: 'ℹ️ Biedronka Warszawa (Glovo) • Oczekiwanie na zweryfikowany cennik',
+                          az: 'ℹ️ Biedronka Varşava (Glovo) • Təsdiqlənmiş cədvəl gözlənilir',
                         })}
                   </div>
-                  <div style={{ opacity: 0.88 }}>
+                  <div style={{ opacity: 0.9, marginTop: 1 }}>
                     {pickLocalizedText(lang, {
-                      en: `Last price update: ${lastSyncLabel} UTC`,
-                      pl: `Ostatnia aktualizacja cen: ${lastSyncLabel} UTC`,
-                      az: `Son qiymət yenilənməsi: ${lastSyncLabel} UTC`,
+                      en: 'Tap any matched product row for ingredients, nutrition (100g/ml), origin & Glovo link.',
+                      pl: 'Kliknij dopasowany produkt, aby zobaczyć składniki, wartości odżywcze (100g/ml), pochodzenie i link Glovo.',
+                      az: 'Tərkib, qida dəyəri (100q/ml), mənşə və Glovo linki üçün uyğunlaşdırılmış məhsula toxunun.',
                     })}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  data-testid="btn-sync-bazarstore"
-                  onClick={async () => {
-                    const res = await clientApi.syncBazarstorePrices();
-                    setState(res.state);
-                    showToast(
-                      pickLocalizedText(lang, {
-                        en: 'Synced latest Bazarstore & regional prices!',
-                        pl: 'Zsynchronizowano najnowsze ceny Bazarstore!',
-                        az: 'Bazarstore qiymətləri yeniləndi!',
-                      })
-                    );
-                  }}
+              );
+            })()
+          ) : (
+            (() => {
+              const monitor = state.priceMonitoring;
+              const outdatedCount = allItems.filter((i) => i.isOutdated).length;
+              const lastSyncLabel = monitor?.lastSuccessfulSyncAt
+                ? monitor.lastSuccessfulSyncAt.slice(0, 16).replace('T', ' ')
+                : state.shoppingList.updatedAt.slice(0, 16).replace('T', ' ');
+              return (
+                <div
+                  data-testid="shopping-price-monitor-bar"
                   style={{
-                    border: '1px solid #196431',
-                    background: '#FFFFFF',
-                    color: '#196431',
-                    borderRadius: 999,
-                    padding: '3px 8px',
-                    fontSize: 9.5,
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    display: 'inline-flex',
+                    background: outdatedCount > 0 ? '#FFFBEB' : '#F2F9F4',
+                    border: `1px solid ${outdatedCount > 0 ? '#FDE68A' : '#CBE4D2'}`,
+                    borderRadius: 11,
+                    padding: '6px 9px',
+                    marginBottom: 10,
+                    display: 'flex',
                     alignItems: 'center',
-                    gap: 4,
-                    flexShrink: 0,
+                    justifyContent: 'space-between',
+                    gap: 6,
+                    fontSize: 10,
+                    color: outdatedCount > 0 ? '#92400E' : '#164A26',
                   }}
                 >
-                  <RefreshCw size={10} />
-                  {pickLocalizedText(lang, {
-                    en: 'Sync',
-                    pl: 'Odśwież',
-                    az: 'Yenilə',
-                  })}
-                </button>
-              </div>
-            );
-          })()}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 800 }}>
+                      {outdatedCount > 0
+                        ? pickLocalizedText(lang, {
+                            en: `⚠️ ${outdatedCount} outdated price(s) (>48h old)`,
+                            pl: `⚠️ ${outdatedCount} nieaktualnych cen (>48h)`,
+                            az: `⚠️ ${outdatedCount} köhnəlmiş qiymət (>48 saat)`,
+                          })
+                        : pickLocalizedText(lang, {
+                            en: '✓ 24h Price Monitor Active (Bazarstore & Regional)',
+                            pl: '✓ Monitoring cen 24h aktywny',
+                            az: '✓ 24s Qiymət Monitorinqi Aktivdir (Bazarstore)',
+                          })}
+                    </div>
+                    <div style={{ opacity: 0.88 }}>
+                      {pickLocalizedText(lang, {
+                        en: `Last price update: ${lastSyncLabel} UTC`,
+                        pl: `Ostatnia aktualizacja cen: ${lastSyncLabel} UTC`,
+                        az: `Son qiymət yenilənməsi: ${lastSyncLabel} UTC`,
+                      })}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="btn-sync-bazarstore"
+                    onClick={async () => {
+                      const res = await clientApi.syncBazarstorePrices();
+                      setState(res.state);
+                      showToast(
+                        pickLocalizedText(lang, {
+                          en: 'Synced latest Bazarstore & regional prices!',
+                          pl: 'Zsynchronizowano najnowsze ceny Bazarstore!',
+                          az: 'Bazarstore qiymətləri yeniləndi!',
+                        })
+                      );
+                    }}
+                    style={{
+                      border: '1px solid #196431',
+                      background: '#FFFFFF',
+                      color: '#196431',
+                      borderRadius: 999,
+                      padding: '3px 8px',
+                      fontSize: 9.5,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <RefreshCw size={10} />
+                    {pickLocalizedText(lang, {
+                      en: 'Sync',
+                      pl: 'Odśwież',
+                      az: 'Yenilə',
+                    })}
+                  </button>
+                </div>
+              );
+            })()
+          )}
 
           {/* Collapsible Category Sections */}
           {Array.from(grouped.entries()).map(([category, items]) => {
@@ -2251,43 +2425,145 @@ export const MealPlannerApp: React.FC = () => {
                 </div>
 
                 {!collapsed &&
-                  items.map((item) => (
+                  items.map((item) => {
+                    const isVerifiedPolishBiedronka = hasGlovoProduct(item);
+                    const isDemoBiedronkaPrice = hasDemoPrice(item);
+                    const warsawObservedLabel = isVerifiedPolishBiedronka
+                      ? formatWarsawObservationTimestamp(item.priceObservedAt, lang)
+                      : null;
+
+                    const toggleItemPurchased = async () => {
+                      const targetKey = item.isManual ? item.id : item.canonicalIngredient;
+                      const nextPurchased = !item.isPurchased;
+                      setState((prev) => {
+                        if (!prev) return prev;
+                        const updatedItems = prev.shoppingList.items.map((it) =>
+                          it.id === item.id ? { ...it, isPurchased: nextPurchased } : it
+                        );
+                        const boughtCount = updatedItems.filter((it) => it.isPurchased).length;
+                        return {
+                          ...prev,
+                          shoppingList: {
+                            ...prev.shoppingList,
+                            items: updatedItems,
+                            boughtCount,
+                            toBuyCount: updatedItems.length - boughtCount,
+                          },
+                        };
+                      });
+                      const next = await clientApi.toggleShoppingItem(targetKey);
+                      setState(next);
+                    };
+
+                    return (
                     <div
                       key={item.id}
                       className="mp-shop-item-card"
-                      onClick={async () => {
-                        const targetKey = item.isManual ? item.id : item.canonicalIngredient;
-                        const nextPurchased = !item.isPurchased;
-                        setState((prev) => {
-                          if (!prev) return prev;
-                          const updatedItems = prev.shoppingList.items.map((it) =>
-                            it.id === item.id ? { ...it, isPurchased: nextPurchased } : it
-                          );
-                          const boughtCount = updatedItems.filter((it) => it.isPurchased).length;
-                          return {
-                            ...prev,
-                            shoppingList: {
-                              ...prev.shoppingList,
-                              items: updatedItems,
-                              boughtCount,
-                              toBuyCount: updatedItems.length - boughtCount,
-                            },
-                          };
-                        });
-                        const next = await clientApi.toggleShoppingItem(targetKey);
-                        setState(next);
-                      }}
                       data-testid={`shop-item-${item.canonicalIngredient}`}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
-                        <span className={`mp-checkbox ${item.isPurchased ? 'checked' : ''}`}>
-                          {item.isPurchased && <Check size={12} strokeWidth={3} />}
-                        </span>
-                        <span style={{ fontSize: 20 }}>{item.icon}</span>
-                        <div style={{ minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontSize: 12.5,
+                        <button
+                          type="button"
+                          role="checkbox"
+                          aria-checked={item.isPurchased}
+                          aria-label={pickLocalizedText(lang, {
+                            en: `Mark ${item.namePl || item.nameEn} as purchased`,
+                            pl: `Oznacz ${item.namePl} jako kupione`,
+                            az: `${item.nameAz || item.nameEn} alındı kimi işarələ`,
+                          })}
+                          data-testid={`shop-checkbox-${item.canonicalIngredient}`}
+                          onClick={toggleItemPurchased}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            padding: 0,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <span className={`mp-checkbox ${item.isPurchased ? 'checked' : ''}`}>
+                            {item.isPurchased && <Check size={12} strokeWidth={3} />}
+                          </span>
+                        </button>
+                      <span style={{ fontSize: 20, flexShrink: 0 }} aria-hidden="true">{item.icon}</span>
+                      <button
+                        type="button"
+                        className="mp-shop-detail-trigger"
+                        data-testid={`shop-detail-trigger-${item.canonicalIngredient}`}
+                        onClick={() => handleOpenBiedronkaProductDetail(item)}
+                      >
+                        <span style={{ display: 'block', flex: 1, minWidth: 0 }}>
+                          {isVerifiedPolishBiedronka ? (
+                            <>
+                            <span
+                              data-testid={`shop-product-name-${item.canonicalIngredient}`}
+                              style={{ display: 'block', fontSize: 12.5,
+                                fontWeight: 800,
+                                textDecoration: item.isPurchased ? 'line-through' : 'none',
+                                color: item.isPurchased ? '#8A948D' : '#1B241E',
+                              }}
+                            >
+                              {item.matchedProductNamePl || item.namePl}
+                            </span>
+                            <span style={{ display: 'block', fontSize: 10.5, color: '#647067' }}>
+                              <span data-testid={`shop-product-package-${item.canonicalIngredient}`}>
+                                {localizeQuantityLabel(item.packageSizeLabel, lang)}
+                              </span>
+                              {item.leftoverAmount > 0 && (
+                                <span style={{ color: '#2B8A44', marginLeft: 4 }}>
+                                  (+{localizeQuantityLabel(item.leftoverDisplayLabel, lang)}{' '}
+                                  {pickLocalizedText(lang, {
+                                    en: 'pantry',
+                                    pl: 'spiżarnia',
+                                    az: 'anbar',
+                                  })}
+                                  )
+                                </span>
+                              )}
+                              {item.isOutdated && (
+                                <span
+                                  data-testid={`badge-outdated-${item.canonicalIngredient}`}
+                                  style={{
+                                    marginLeft: 4,
+                                    fontSize: 9,
+                                    background: '#FEF3C7',
+                                    color: '#92400E',
+                                    padding: '1px 5px',
+                                    borderRadius: 4,
+                                    fontWeight: 800,
+                                  }}
+                                >
+                                  ⚠️{' '}
+                                  {pickLocalizedText(lang, {
+                                    en: 'Outdated price',
+                                    pl: 'Cena nieaktualna',
+                                    az: 'Köhnəlmiş qiymət',
+                                  })}
+                                </span>
+                              )}
+                            </span>
+                            <span
+                              data-testid={`shop-observed-at-${item.canonicalIngredient}`}
+                              style={{ display: 'block', fontSize: 9.5, color: '#475569', marginTop: 2 }}
+                            >
+                              {warsawObservedLabel
+                                ? pickLocalizedText(lang, {
+                                    en: `Observed: ${warsawObservedLabel}`,
+                                    pl: `Zaobserwowano: ${warsawObservedLabel}`,
+                                    az: `Müşahidə: ${warsawObservedLabel}`,
+                                  })
+                                : pickLocalizedText(lang, {
+                                    en: 'Observation time: Unknown',
+                                    pl: 'Czas obserwacji: Nieznany',
+                                    az: 'Müşahidə vaxtı: Naməlum',
+                                  })}
+                            </span>
+                            </>
+                          ) : (
+                        <span style={{ display: 'block', minWidth: 0 }}>
+                          <span
+                            style={{ display: 'block', fontSize: 12.5,
                               fontWeight: 800,
                               textDecoration: item.isPurchased ? 'line-through' : 'none',
                               color: item.isPurchased ? '#8A948D' : '#1B241E',
@@ -2298,8 +2574,17 @@ export const MealPlannerApp: React.FC = () => {
                               pl: item.namePl,
                               az: item.nameAz,
                             })}
-                          </div>
-                          <div style={{ fontSize: 10.5, color: '#647067' }}>
+                          </span>
+                          {isDemoBiedronkaPrice && (
+                            <span style={{ display: 'block', fontSize: 10.5, color: '#647067' }}>
+                              {pickLocalizedText(lang, {
+                                en: 'Demo catalog price',
+                                pl: 'Cena z katalogu demonstracyjnego',
+                                az: 'Demo kataloq qiyməti',
+                              })}
+                            </span>
+                          )}
+                          <span style={{ display: 'block', fontSize: 10.5, color: '#647067' }}>
                             {localizeQuantityLabel(item.packageSizeLabel, lang)}
                             {item.leftoverAmount > 0 && (
                               <span style={{ color: '#2B8A44', marginLeft: 4 }}>
@@ -2377,53 +2662,89 @@ export const MealPlannerApp: React.FC = () => {
                                 })}
                               </span>
                             )}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 4 }}>
-                            {item.regularLineTotalPln > item.lineTotalPln + 0.005 && (
+                          </span>
+                        </span>
+                          )}
+                        </span>
+                      <span style={{  display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <span style={{ display: 'block', textAlign: 'right' }}>
+                          {item.isPriced === false ? (
+                            <>
                               <span
-                                style={{
-                                  fontSize: 9,
+                                data-testid={`unpriced-item-${item.canonicalIngredient}`}
+                                style={{ display: 'block', fontSize: 11,
                                   fontWeight: 800,
-                                  background: '#FACC15',
-                                  color: '#1B241E',
-                                  padding: '1px 4px',
-                                  borderRadius: 999,
+                                  color: '#92400E',
+                                  background: '#FEF3C7',
+                                  padding: '2px 6px',
+                                  borderRadius: 6,
                                 }}
                               >
-                                -{Math.round(((item.regularLineTotalPln - item.lineTotalPln) / item.regularLineTotalPln) * 100)}%
+                                {pickLocalizedText(lang, {
+                                  en: 'Unpriced',
+                                  pl: 'Brak ceny',
+                                  az: 'Qiymətsiz',
+                                })}
                               </span>
-                            )}
-                            <span
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 900,
-                                color:
-                                  item.regularLineTotalPln > item.lineTotalPln + 0.005
-                                    ? '#DC2626'
-                                    : '#1B241E',
-                              }}
-                            >
-                              {formatPln(item.lineTotalPln, activeCurrency)}
-                            </span>
-                            {item.regularLineTotalPln > item.lineTotalPln + 0.005 && (
-                              <span
-                                style={{
-                                  fontSize: 10,
-                                  color: '#9CA3AF',
-                                  textDecoration: 'line-through',
-                                  fontWeight: 600,
-                                }}
-                              >
-                                {formatPln(item.regularLineTotalPln, activeCurrency)}
+                              <span style={{ display: 'block', fontSize: 9, color: '#92400E', marginTop: 2 }}>
+                                {pickLocalizedText(lang, {
+                                  en: 'Ambiguous / unmatched',
+                                  pl: 'Niedopasowany',
+                                  az: 'Uyğunlaşdırılmadı',
+                                })}
                               </span>
-                            )}
-                          </div>
-                          <div style={{ fontSize: 9.5, color: '#647067' }}>{item.unitPriceLabel}</div>
-                        </div>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 4 }}>
+                                {shouldShowPromoIndicators(activeRegion, item.supermarketId) &&
+                                  item.regularLineTotalPln > item.lineTotalPln + 0.005 && (
+                                  <span
+                                    style={{
+                                      fontSize: 9,
+                                      fontWeight: 800,
+                                      background: '#FACC15',
+                                      color: '#1B241E',
+                                      padding: '1px 4px',
+                                      borderRadius: 999,
+                                    }}
+                                  >
+                                    -{Math.round(((item.regularLineTotalPln - item.lineTotalPln) / item.regularLineTotalPln) * 100)}%
+                                  </span>
+                                )}
+                                <span
+                                  style={{
+                                    fontSize: 13,
+                                    fontWeight: 900,
+                                    color:
+                                      shouldShowPromoIndicators(activeRegion, item.supermarketId) &&
+                                      item.regularLineTotalPln > item.lineTotalPln + 0.005
+                                        ? '#DC2626'
+                                        : '#1B241E',
+                                  }}
+                                >
+                                  {formatPln(item.lineTotalPln, activeCurrency)}
+                                </span>
+                                {shouldShowPromoIndicators(activeRegion, item.supermarketId) &&
+                                  item.regularLineTotalPln > item.lineTotalPln + 0.005 && (
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      color: '#9CA3AF',
+                                      textDecoration: 'line-through',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {formatPln(item.regularLineTotalPln, activeCurrency)}
+                                  </span>
+                                )}
+                              </span>
+                              <span style={{ display: 'block', fontSize: 9.5, color: '#647067' }}>{item.unitPriceLabel}</span>
+                            </>
+                          )}
+                        </span>
+                      </span>
+                      </button>
                         {item.isManual && (
                           <button
                             className="mp-icon-btn"
@@ -2438,9 +2759,9 @@ export const MealPlannerApp: React.FC = () => {
                             <Trash2 size={13} color="#DC2626" />
                           </button>
                         )}
-                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
               </div>
             );
           })}
@@ -2472,6 +2793,26 @@ export const MealPlannerApp: React.FC = () => {
                   </div>
                   <div style={{ fontSize: 11, color: '#2B8A44', fontWeight: 800 }}>
                     {formatPln(displayBasketCost, activeCurrency)}
+                    {state.shoppingList.hasIncompleteTotal && (
+                      <span
+                        data-testid="shopping-incomplete-total-badge"
+                        style={{
+                          marginLeft: 6,
+                          fontSize: 9.5,
+                          color: '#92400E',
+                          background: '#FEF3C7',
+                          padding: '1px 5px',
+                          borderRadius: 6,
+                        }}
+                      >
+                        ⚠️{' '}
+                        {pickLocalizedText(lang, {
+                          en: `Incomplete (${state.shoppingList.unpricedItemsCount || 0} unpriced)`,
+                          pl: `Niepełna suma (${state.shoppingList.unpricedItemsCount || 0} bez ceny)`,
+                          az: `Natamam cəm (${state.shoppingList.unpricedItemsCount || 0} qiymətsiz)`,
+                        })}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2479,6 +2820,24 @@ export const MealPlannerApp: React.FC = () => {
                 {formatPln(displayBasketCost, activeCurrency)}
               </div>
             </div>
+
+            {isRegularPriceOnlyPolicyActive(activeRegion, currentStore) && (
+              <div
+                data-testid="shopping-regular-price-note"
+                style={{
+                  fontSize: 10.5,
+                  color: '#475569',
+                  marginBottom: 9,
+                  lineHeight: 1.35,
+                }}
+              >
+                {pickLocalizedText(lang, {
+                  en: 'Prices shown are regular prices. In-store offers may be cheaper.',
+                  pl: 'Podane ceny to ceny regularne. Oferty w sklepie mogą być niższe.',
+                  az: 'Göstərilən qiymətlər daimi qiymətlərdir. Mağazadaxili təkliflər daha ucuz ola bilər.',
+                })}
+              </div>
+            )}
 
             <button
               className="mp-primary-cta-btn"
@@ -2494,6 +2853,27 @@ export const MealPlannerApp: React.FC = () => {
           </div>
         </div>
         {renderBottomNav('shopping')}
+        <BiedronkaProductDetailModal
+          lang={lang}
+          isOpen={Boolean(selectedBiedronkaDetail)}
+          loading={biedronkaDetailLoading}
+          detail={selectedBiedronkaDetail}
+          currencyCode={activeCurrency}
+          isGlovoProduct={!!selectedBiedronkaItem && hasGlovoProduct(selectedBiedronkaItem)}
+          isDemoPrice={!!selectedBiedronkaItem && hasDemoPrice(selectedBiedronkaItem)}
+          isPriced={selectedBiedronkaItem?.isPriced !== false}
+          onClose={() => {
+            ++productDetailRequest.current;
+            setBiedronkaDetailLoading(false);
+            setSelectedBiedronkaDetail(null);
+            setSelectedBiedronkaItem(null);
+          }}
+          onRetry={
+            selectedBiedronkaItem
+              ? () => handleOpenBiedronkaProductDetail(selectedBiedronkaItem)
+              : undefined
+          }
+        />
       </div>
     );
   };
@@ -3149,6 +3529,7 @@ export const MealPlannerApp: React.FC = () => {
           setActiveTab('recipes');
         }}
       />
+
     </div>
   );
 };

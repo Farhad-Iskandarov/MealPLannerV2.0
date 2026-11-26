@@ -1,4 +1,5 @@
-import { Recipe, UserPreferences, DietaryOption } from '../../shared/types';
+import { Recipe, UserPreferences, DietaryOption, PlannedMeal, MealType } from '../../shared/types';
+import { normalizeCuisinePreference } from '../../shared/cuisineConfig';
 
 export interface ValidationResult {
   valid: boolean;
@@ -35,6 +36,7 @@ const GLUTEN_CANONICALS = new Set([
   'wholegrain_bread',
   'wheat_flour',
   'oat_flakes', // standard oats unless certified GF
+  'pearl_barley', // barley contains gluten (hordein)
 ]);
 
 const LACTOSE_CANONICALS = new Set([
@@ -46,13 +48,360 @@ const LACTOSE_CANONICALS = new Set([
 
 const HIGH_CARB_KETO_EXCLUDED_CANONICALS = new Set([
   'rice',
+  'risotto_rice',
   'pasta',
   'wholegrain_bread',
   'oat_flakes',
+  'pearl_barley',
   'potato',
   'banana',
   'red_lentils',
 ]);
+
+function foldDiacritics(input: string): string {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/ł/g, 'l')
+    .replace(/ą/g, 'a')
+    .replace(/ć/g, 'c')
+    .replace(/ę/g, 'e')
+    .replace(/ń/g, 'n')
+    .replace(/ó/g, 'o')
+    .replace(/ś/g, 's')
+    .replace(/ź/g, 'z')
+    .replace(/ż/g, 'z')
+    .replace(/ə/g, 'e')
+    .replace(/ı/g, 'i')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Known compound & alias families for deterministic hard exclusion enforcement
+ * across allergies, dislikes, excludedIngredients, and customRestrictions.
+ */
+const EXCLUSION_FAMILIES: Array<{
+  family: string;
+  triggers: string[];
+  canonicals: string[];
+  compoundKeywords: string[];
+}> = [
+  {
+    family: 'onion',
+    triggers: [
+      'onion',
+      'onions',
+      'cebula',
+      'cebuli',
+      'cebule',
+      'cebulka',
+      'cebulowy',
+      'cebulowa',
+      'dymka',
+      'szczypiorek',
+      'szczypior',
+      'szalotka',
+      'shallot',
+      'scallion',
+      'spring onion',
+      'red onion',
+      'yellow onion',
+      'chives',
+      'por',
+      'leek',
+      'sogan',
+      'onion powder',
+    ],
+    canonicals: ['onion', 'red_onion', 'spring_onion', 'shallot', 'chives', 'leek'],
+    compoundKeywords: [
+      'onion',
+      'cebula',
+      'cebuli',
+      'cebule',
+      'cebulka',
+      'cebulow',
+      'dymka',
+      'szczypiorek',
+      'szalotka',
+      'shallot',
+      'scallion',
+      'chives',
+      'sogan',
+    ],
+  },
+  {
+    family: 'milk',
+    triggers: ['milk', 'dairy', 'mleko', 'nabial', 'laktoza', 'lactose', 'sud', 'qatiq', 'kesmik'],
+    canonicals: ['milk', 'greek_yogurt', 'cottage_cheese', 'cheese', 'butter', 'cream'],
+    compoundKeywords: [
+      'milk',
+      'mleko',
+      'dairy',
+      'nabial',
+      'yogurt',
+      'jogurt',
+      'skyr',
+      'cottage cheese',
+      'twarog',
+      'cheese',
+      'ser ',
+      'serek',
+      'parmesan',
+      'parmezan',
+      'mozzarella',
+      'feta',
+      'ricotta',
+      'mascarpone',
+      'butter',
+      'maslo',
+      'cream',
+      'smietana',
+      'pesto',
+      'whey',
+      'serwatka',
+      'casein',
+      'kazeina',
+      'kefir',
+      'maslanka',
+      'qatiq',
+      'kesmik',
+    ],
+  },
+  {
+    family: 'gluten',
+    triggers: ['gluten', 'wheat', 'pszenica', 'maka', 'qluten'],
+    canonicals: ['pasta', 'wholegrain_bread', 'wheat_flour', 'oat_flakes', 'pearl_barley'],
+    compoundKeywords: [
+      'gluten',
+      'wheat',
+      'pszenic',
+      'pasta',
+      'makaron',
+      'bread',
+      'chleb',
+      'bulka',
+      'breadcrumbs',
+      'bulka tarta',
+      'couscous',
+      'kuskus',
+      'flour',
+      'maka',
+      'oat',
+      'owsian',
+      'yulaf',
+      'pierogi',
+      'tortilla',
+      'lavash',
+      'lavas',
+      'barley',
+      'pearl barley',
+      'jeczmien',
+      'kasza jeczmienna',
+      'perlowa',
+      'peczak',
+      'arpa yarmasi',
+      'rye',
+      'zyto',
+      'zytni',
+    ],
+  },
+  {
+    family: 'eggs',
+    triggers: ['egg', 'eggs', 'jaja', 'jajka', 'jajko', 'yumurta'],
+    canonicals: ['eggs'],
+    compoundKeywords: [
+      'egg',
+      'jaja',
+      'jajka',
+      'jajko',
+      'jajeczn',
+      'mayonnaise',
+      'majonez',
+      'omlet',
+      'omelette',
+      'yumurta',
+    ],
+  },
+  {
+    family: 'soy',
+    triggers: ['soy', 'soja', 'soya', 'tofu'],
+    canonicals: ['tofu', 'tofu_pesto', 'soy_sauce'],
+    compoundKeywords: ['soy', 'soja', 'soya', 'tofu', 'edamame', 'tempeh', 'miso', 'sos sojowy', 'soy sauce'],
+  },
+  {
+    family: 'nuts',
+    triggers: ['nut', 'nuts', 'peanut', 'peanuts', 'orzech', 'orzechy', 'orzeszki', 'migdal', 'almond', 'cashew', 'hazelnut', 'pistachio', 'qoz', 'findiq'],
+    canonicals: ['nuts', 'peanuts', 'almonds', 'walnuts', 'cashews', 'hazelnuts', 'pistachios'],
+    compoundKeywords: [
+      'nut',
+      'peanut',
+      'orzech',
+      'orzeszk',
+      'migdal',
+      'almond',
+      'walnut',
+      'hazelnut',
+      'laskow',
+      'cashew',
+      'nerkowc',
+      'pistachio',
+      'pistacj',
+      'pecan',
+      'pesto',
+      'maslo orzechowe',
+      'peanut butter',
+      'qoz',
+      'findiq',
+      'badam',
+    ],
+  },
+  {
+    family: 'fish',
+    triggers: ['fish', 'ryba', 'ryby', 'seafood', 'baliq', 'salmon', 'losos'],
+    canonicals: ['salmon', 'cod', 'tuna', 'trout'],
+    compoundKeywords: [
+      'fish',
+      'ryb',
+      'salmon',
+      'losos',
+      'cod',
+      'dorsz',
+      'tuna',
+      'tunczyk',
+      'trout',
+      'pstrag',
+      'forel',
+      'anchovy',
+      'anchois',
+      'fish sauce',
+      'sos rybny',
+      'qizilbaliq',
+    ],
+  },
+  {
+    family: 'garlic',
+    triggers: ['garlic', 'czosnek', 'czosnku', 'sarimsaq'],
+    canonicals: ['garlic'],
+    compoundKeywords: ['garlic', 'czosnek', 'czosnk', 'sarimsaq'],
+  },
+];
+
+function wordOrPhraseMatch(haystack: string, needle: string): boolean {
+  if (!needle) return false;
+  if (haystack === needle) return true;
+  if (needle.includes(' ')) {
+    return haystack.includes(needle);
+  }
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[\\s,.;()/\\-_])${escaped}(?=$|[\\s,.;()/\\-_])`, 'i').test(haystack);
+}
+
+/**
+ * Checks whether an ingredient (or shopping item) matches a user's hard exclusion term
+ * (allergy, dislike, excluded ingredient, or custom restriction), including known compounds
+ * and onion/cebula aliases.
+ */
+export function matchIngredientAgainstExclusionTerm(
+  ingredient: {
+    canonicalIngredient: string;
+    namePl?: string;
+    nameEn?: string;
+    nameAz?: string;
+  },
+  rawTerm: string
+): { matched: boolean; family?: string; reason?: string } {
+  const term = foldDiacritics(rawTerm);
+  if (!term) return { matched: false };
+
+  const canonical = foldDiacritics(ingredient.canonicalIngredient).replace(/_/g, ' ');
+  const rawCanonical = foldDiacritics(ingredient.canonicalIngredient);
+  const hay = foldDiacritics(
+    `${canonical} ${ingredient.namePl || ''} ${ingredient.nameEn || ''} ${ingredient.nameAz || ''}`
+  );
+
+  // 1. Direct normalized match on canonical or localized names
+  if (
+    rawCanonical === term.replace(/\s+/g, '_') ||
+    wordOrPhraseMatch(hay, term) ||
+    (term.length >= 4 && hay.includes(term))
+  ) {
+    return { matched: true, reason: `direct match '${rawTerm}'` };
+  }
+
+  // 2. Family / compound / alias expansion (e.g. onion/cebula, milk/pesto/parmesan, gluten/pasta, soy/tofu)
+  for (const fam of EXCLUSION_FAMILIES) {
+    const termTriggersFamily = fam.triggers.some(
+      (tr) => tr === term || (term.length >= 3 && (tr.includes(term) || term.includes(tr)))
+    );
+    if (!termTriggersFamily) continue;
+
+    if (fam.canonicals.includes(rawCanonical)) {
+      return {
+        matched: true,
+        family: fam.family,
+        reason: `family '${fam.family}' canonical match for '${rawTerm}'`,
+      };
+    }
+    for (const kw of fam.compoundKeywords) {
+      if (kw.endsWith(' ') ? hay.includes(kw) : wordOrPhraseMatch(hay, kw) || (kw.length >= 5 && hay.includes(kw))) {
+        return {
+          matched: true,
+          family: fam.family,
+          reason: `compound/alias '${kw}' in family '${fam.family}' for '${rawTerm}'`,
+        };
+      }
+    }
+  }
+
+  return { matched: false };
+}
+
+/**
+ * Collects all hard-excluded user terms (allergies + dislikes + excludedIngredients + customRestrictions).
+ */
+export function collectHardExclusionTerms(
+  preferences: Pick<
+    UserPreferences,
+    'allergies' | 'excludedIngredients' | 'customRestrictions'
+  > & { dislikes?: string[] }
+): string[] {
+  return Array.from(
+    new Set(
+      [
+        ...(preferences.allergies || []),
+        ...(preferences.dislikes || []),
+        ...(preferences.excludedIngredients || []),
+        ...(preferences.customRestrictions || []),
+      ]
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+/**
+ * Returns true if an ingredient or shopping item is hard-excluded by the user's allergies,
+ * dislikes, excluded ingredients, or custom restrictions.
+ */
+export function isIngredientHardExcluded(
+  ingredient: {
+    canonicalIngredient: string;
+    namePl?: string;
+    nameEn?: string;
+    nameAz?: string;
+  },
+  hardExclusionTerms: string[]
+): { excluded: boolean; matchedTerm?: string; reason?: string } {
+  for (const term of hardExclusionTerms) {
+    const res = matchIngredientAgainstExclusionTerm(ingredient, term);
+    if (res.matched) {
+      return { excluded: true, matchedTerm: term, reason: res.reason };
+    }
+  }
+  return { excluded: false };
+}
 
 /**
  * Normalizes a user's kitchen equipment list (whether in English, Polish, Azerbaijani, or wizard IDs)
@@ -204,6 +553,15 @@ export function canPrepareWithEquipment(
       continue;
     }
 
+    // Toaster / Toster (also easily made on a dry skillet/hob or oven)
+    if (req.includes('toster') || req.includes('toaster')) {
+      if (userSet.has('toaster') || userSet.has('hob') || userSet.has('oven') || userSet.has('grill')) {
+        continue;
+      }
+      missing.push(reqRaw);
+      continue;
+    }
+
     // Grill
     if (req.includes('grill') || req.includes('qril')) {
       if (userSet.has('grill') || userSet.has('hob') || userSet.has('oven') || userSet.has('air_fryer')) {
@@ -235,11 +593,24 @@ export function validateRecipeForUser(
     UserPreferences,
     'dietaryRestrictions' | 'customRestrictions' | 'allergies' | 'excludedIngredients' | 'preferredPrepTimeMin'
   > & {
+    dislikes?: string[];
     kitchenEquipment?: string[];
+    preferredCuisine?: UserPreferences['preferredCuisine'];
   },
-  options?: { enforcePrepTime?: boolean; enforceEquipment?: boolean }
+  options?: { enforcePrepTime?: boolean; enforceEquipment?: boolean; enforceCuisine?: boolean }
 ): ValidationResult {
   const violations: string[] = [];
+
+  // 0. Strict Cuisine Filter (independent of region, store, language, and currency)
+  const enforceCuisine = options?.enforceCuisine !== false;
+  const preferredCuisine = normalizeCuisinePreference(preferences.preferredCuisine);
+  if (enforceCuisine && preferredCuisine !== 'any') {
+    if (recipe.cuisine !== preferredCuisine) {
+      violations.push(
+        `CUISINE_MISMATCH: Recipe cuisine '${recipe.cuisine || 'unspecified'}' does not match selected cuisine '${preferredCuisine}'.`
+      );
+    }
+  }
 
   // 1. Required fields & schema validation
   if (!recipe.titlePl?.trim() || !recipe.titleEn?.trim()) {
@@ -273,49 +644,61 @@ export function validateRecipeForUser(
     }
   }
 
-  // 3. Deterministic Allergy Validation
-  const lowerAllergies = (preferences.allergies || []).map((a) => a.trim().toLowerCase()).filter(Boolean);
+  // 3. Deterministic Allergy Validation (including known compounds & aliases)
+  const lowerAllergies = (preferences.allergies || []).map((a) => a.trim()).filter(Boolean);
+  const recipeTitleHay = foldDiacritics(
+    `${recipe.titlePl || ''} ${recipe.titleEn || ''} ${recipe.titleAz || ''} ${recipe.descriptionPl || ''} ${recipe.descriptionEn || ''}`
+  );
   for (const allergy of lowerAllergies) {
-    const recipeAllergens = (recipe.allergens || []).map((a) => a.trim().toLowerCase());
-    if (recipeAllergens.includes(allergy)) {
+    const normAllergy = foldDiacritics(allergy);
+    const recipeAllergens = (recipe.allergens || []).map((a) => foldDiacritics(a));
+    if (recipeAllergens.includes(normAllergy)) {
       violations.push(`ALLERGY_VIOLATION: Recipe contains declared allergen '${allergy}'.`);
     }
+    // Check declared recipe allergens against compound families too (e.g. 'dairy'/'mleko' -> 'milk')
+    for (const fam of EXCLUSION_FAMILIES) {
+      if (fam.triggers.includes(normAllergy) && recipeAllergens.includes(fam.family)) {
+        violations.push(`ALLERGY_VIOLATION: Recipe contains declared allergen family '${fam.family}' matching '${allergy}'.`);
+      }
+    }
     for (const ing of recipe.ingredients || []) {
-      const hay = `${ing.canonicalIngredient} ${ing.namePl} ${ing.nameEn} ${ing.nameAz || ''}`.toLowerCase();
-      if (hay.includes(allergy)) {
-        violations.push(`ALLERGY_VIOLATION: Ingredient '${ing.nameEn}' matches user allergy '${allergy}'.`);
+      const m = matchIngredientAgainstExclusionTerm(ing, allergy);
+      if (m.matched) {
+        violations.push(
+          `ALLERGY_VIOLATION: Ingredient '${ing.nameEn}' matches user allergy '${allergy}' (${m.reason}).`
+        );
       }
-      if ((allergy === 'milk' || allergy === 'dairy' || allergy === 'mleko' || allergy === 'laktoza' || allergy === 'süd' || allergy === 'sud' || allergy === 'qatıq') && LACTOSE_CANONICALS.has(ing.canonicalIngredient)) {
-        violations.push(`ALLERGY_VIOLATION: Ingredient '${ing.nameEn}' contains dairy/lactose.`);
-      }
-      if ((allergy === 'gluten' || allergy === 'pszenica' || allergy === 'qlüten') && GLUTEN_CANONICALS.has(ing.canonicalIngredient)) {
-        violations.push(`ALLERGY_VIOLATION: Ingredient '${ing.nameEn}' contains gluten.`);
-      }
-      if ((allergy === 'eggs' || allergy === 'egg' || allergy === 'jajka' || allergy === 'jaja' || allergy === 'yumurta') && ing.canonicalIngredient === 'eggs') {
-        violations.push(`ALLERGY_VIOLATION: Ingredient '${ing.nameEn}' contains eggs.`);
-      }
-      if ((allergy === 'fish' || allergy === 'ryby' || allergy === 'balıq' || allergy === 'baliq') && FISH_CANONICALS.has(ing.canonicalIngredient)) {
-        violations.push(`ALLERGY_VIOLATION: Ingredient '${ing.nameEn}' contains fish.`);
-      }
-      if ((allergy === 'soy' || allergy === 'soja' || allergy === 'soya') && ing.canonicalIngredient === 'tofu') {
-        violations.push(`ALLERGY_VIOLATION: Ingredient '${ing.nameEn}' contains soy.`);
+    }
+    // Also guard against known compound dishes mentioned in recipe title (e.g., pesto/mayo)
+    for (const fam of EXCLUSION_FAMILIES) {
+      if (fam.triggers.includes(normAllergy)) {
+        for (const compound of ['pesto', 'parmesan', 'parmezan', 'majonez', 'mayonnaise']) {
+          if (fam.compoundKeywords.includes(compound) && wordOrPhraseMatch(recipeTitleHay, compound)) {
+            violations.push(
+              `ALLERGY_VIOLATION: Recipe title/description contains compound '${compound}' in allergy family '${fam.family}'.`
+            );
+          }
+        }
       }
     }
   }
 
-  // 4. Deterministic Excluded Ingredients & Custom Restrictions Validation
-  const exclusions = [
+  // 4. Deterministic Hard Exclusions: Dislikes, Excluded Ingredients & Custom Restrictions (with compounds & onion/cebula aliases)
+  const hardExclusions = [
+    ...(preferences.dislikes || []),
     ...(preferences.excludedIngredients || []),
     ...(preferences.customRestrictions || []),
   ]
-    .map((e) => e.trim().toLowerCase())
+    .map((e) => e.trim())
     .filter(Boolean);
 
-  for (const excl of exclusions) {
+  for (const excl of hardExclusions) {
     for (const ing of recipe.ingredients || []) {
-      const hay = `${ing.canonicalIngredient} ${ing.namePl} ${ing.nameEn} ${ing.nameAz || ''}`.toLowerCase();
-      if (hay.includes(excl)) {
-        violations.push(`EXCLUDED_INGREDIENT: Recipe uses excluded ingredient '${ing.nameEn}' (matched '${excl}').`);
+      const m = matchIngredientAgainstExclusionTerm(ing, excl);
+      if (m.matched) {
+        violations.push(
+          `EXCLUDED_INGREDIENT: Recipe uses excluded/disliked ingredient '${ing.nameEn}' (${m.reason}).`
+        );
       }
     }
   }
@@ -391,6 +774,88 @@ export function validateRecipeForUser(
     violations.push(
       `PREP_TIME_EXCEEDED: Recipe takes ${recipe.totalTimeMin} min, exceeding limit of ${preferences.preferredPrepTimeMin} min.`
     );
+  }
+
+  return {
+    valid: violations.length === 0,
+    violations,
+  };
+}
+
+/**
+ * Deterministically validates a generated weekly meal plan for:
+ * 1. Correct meal slot assignment (`meal.recipe.mealType === meal.mealType`)
+ * 2. Distinct dishes within every day (no duplicate recipe on the same `dayIndex`)
+ * 3. Rotation of all eligible slot recipes before repeating
+ * 4. No consecutive-day repeats for the same slot when >= 2 eligible recipes exist
+ */
+export function validateWeeklyPlanVariety(
+  meals: PlannedMeal[],
+  eligibleCountBySlot?: Partial<Record<MealType, number>>
+): ValidationResult {
+  const violations: string[] = [];
+
+  // 1. Correct meal slot
+  for (const m of meals) {
+    if (m.recipe.mealType !== m.mealType) {
+      violations.push(
+        `SLOT_MISMATCH: Day ${m.dayIndex} slot '${m.mealType}' has recipe '${m.recipe.id}' with mealType '${m.recipe.mealType}'.`
+      );
+    }
+  }
+
+  // 2. Distinct dishes per day
+  const byDay = new Map<number, PlannedMeal[]>();
+  for (const m of meals) {
+    const arr = byDay.get(m.dayIndex) || [];
+    arr.push(m);
+    byDay.set(m.dayIndex, arr);
+  }
+  for (const [dayIndex, dayMeals] of byDay.entries()) {
+    const seen = new Set<string>();
+    for (const m of dayMeals) {
+      if (seen.has(m.recipe.id)) {
+        violations.push(
+          `DUPLICATE_DAILY_DISH: Day ${dayIndex} repeats recipe '${m.recipe.id}' across multiple slots.`
+        );
+      }
+      seen.add(m.recipe.id);
+    }
+  }
+
+  // 3. Consecutive-day repeats & full rotation per slot
+  const bySlot = new Map<MealType, PlannedMeal[]>();
+  for (const m of meals) {
+    const arr = bySlot.get(m.mealType) || [];
+    arr.push(m);
+    bySlot.set(m.mealType, arr);
+  }
+  for (const [slot, slotMeals] of bySlot.entries()) {
+    const sorted = [...slotMeals].sort((a, b) => a.dayIndex - b.dayIndex);
+    const eligibleCount = eligibleCountBySlot?.[slot];
+
+    if (eligibleCount === undefined || eligibleCount >= 2) {
+      for (let i = 1; i < sorted.length; i++) {
+        if (
+          sorted[i].dayIndex === sorted[i - 1].dayIndex + 1 &&
+          sorted[i].recipe.id === sorted[i - 1].recipe.id
+        ) {
+          violations.push(
+            `CONSECUTIVE_REPEAT: Slot '${slot}' repeats '${sorted[i].recipe.id}' on consecutive days ${sorted[i - 1].dayIndex} and ${sorted[i].dayIndex}.`
+          );
+        }
+      }
+    }
+
+    if (eligibleCount !== undefined && eligibleCount > 0 && sorted.length > 0) {
+      const uniqueUsed = new Set(sorted.map((m) => m.recipe.id)).size;
+      const expectedMinUnique = Math.min(eligibleCount, sorted.length);
+      if (uniqueUsed < expectedMinUnique) {
+        violations.push(
+          `INCOMPLETE_ROTATION: Slot '${slot}' used only ${uniqueUsed} unique recipes across ${sorted.length} days (${eligibleCount} eligible available).`
+        );
+      }
+    }
   }
 
   return {

@@ -27,8 +27,13 @@ import {
 import {
   getDefaultCurrencyForRegion,
   isSupermarketInRegion,
+  isLegacyPolishSupermarketSlug,
   resolveValidSupermarketForRegion,
 } from '../shared/regionConfig';
+import {
+  isValidCuisinePreference,
+  normalizeCuisinePreference,
+} from '../shared/cuisineConfig';
 
 export interface AuthenticatedRequest extends Request {
   userId?: string;
@@ -103,12 +108,12 @@ export function createApp(dbInstance: MealPlannerDatabase) {
     if (!user) {
       throw new Error('User not found');
     }
+    dbInstance.refreshInMemoryCatalogueFromMonitoredPrices();
     const activeRegion: RegionCode = user.regionCode || user.preferences.regionCode || 'PL';
     const weeklyPlan = dbInstance.getWeeklyPlan(userId);
     const shoppingList = dbInstance.getShoppingList(userId, weeklyPlan.meals);
     const recipes = dbInstance.getAllRecipesForUser(userId);
     const pantry = dbInstance.getPantryItems(userId);
-    dbInstance.refreshInMemoryCatalogueFromMonitoredPrices();
     const supermarkets = supermarketRegistry.getAllSupermarkets(activeRegion);
     const promotionalOffers = supermarketRegistry.getPromotionalOffers(activeRegion);
     const priceComparisons = supermarketRegistry.compareProductsAcrossStores(undefined, activeRegion);
@@ -119,6 +124,10 @@ export function createApp(dbInstance: MealPlannerDatabase) {
       allRecipes: recipes,
     });
     const priceMonitoring = dbInstance.getPriceMonitoringSummary('bazarstore');
+    const biedronkaSnapshot = {
+      summary: dbInstance.getBiedronkaSnapshotSummary(),
+      items: dbInstance.getActiveBiedronkaSnapshotItems(),
+    };
 
     return {
       user,
@@ -131,6 +140,7 @@ export function createApp(dbInstance: MealPlannerDatabase) {
       priceComparisons,
       budgetAnalysis,
       priceMonitoring,
+      biedronkaSnapshot,
     };
   }
 
@@ -208,7 +218,15 @@ export function createApp(dbInstance: MealPlannerDatabase) {
         currencyCode || getDefaultCurrencyForRegion(resolvedRegion);
       const resolvedLanguage: Language = VALID_LANGUAGES.has(language) ? language : 'en';
 
-      if (preferredSupermarket && !isSupermarketInRegion(preferredSupermarket, resolvedRegion)) {
+      const effectivePreferredSupermarket =
+        resolvedRegion === 'PL' && preferredSupermarket && isLegacyPolishSupermarketSlug(preferredSupermarket)
+          ? 'biedronka'
+          : preferredSupermarket;
+
+      if (
+        effectivePreferredSupermarket &&
+        !isSupermarketInRegion(effectivePreferredSupermarket, resolvedRegion)
+      ) {
         res.status(400).json({
           error: `Selected supermarket '${preferredSupermarket}' does not belong to region '${resolvedRegion}'`,
         });
@@ -427,6 +445,15 @@ export function createApp(dbInstance: MealPlannerDatabase) {
 
       const targetRegion: RegionCode = patch.regionCode || currentPrefs.regionCode || 'PL';
 
+      // Coerce legacy Polish supermarket selections (lidl/auchan/kaufland/carrefour/zabka) to biedronka
+      if (
+        targetRegion === 'PL' &&
+        patch.preferredSupermarket !== undefined &&
+        isLegacyPolishSupermarketSlug(patch.preferredSupermarket)
+      ) {
+        patch.preferredSupermarket = 'biedronka';
+      }
+
       // Validate that if preferredSupermarket is explicitly supplied without changing region, it must belong to targetRegion
       if (
         patch.preferredSupermarket !== undefined &&
@@ -454,14 +481,45 @@ export function createApp(dbInstance: MealPlannerDatabase) {
         res.status(400).json({ error: 'Plan duration must be between 1 and 7 days' });
         return;
       }
+      if (
+        patch.preferredCuisine !== undefined &&
+        patch.preferredCuisine !== null &&
+        !isValidCuisinePreference(patch.preferredCuisine)
+      ) {
+        res.status(400).json({
+          error:
+            'Unsupported cuisine. Supported: any, italian, french, polish, greek, azerbaijani, spanish',
+        });
+        return;
+      }
+      if (patch.preferredCuisine !== undefined) {
+        patch.preferredCuisine = normalizeCuisinePreference(patch.preferredCuisine);
+      }
 
+      const previousPrefs = dbInstance.getPreferences(userId);
       dbInstance.updatePreferences(userId, patch);
       if (patch.regeneratePlan) {
-        await dbInstance.generateAndSaveWeeklyPlan(userId, Date.now() % 100);
+        try {
+          await dbInstance.generateAndSaveWeeklyPlan(userId, Date.now() % 100);
+        } catch (genErr: any) {
+          if (genErr?.code === 'BUDGET_INFEASIBLE') {
+            // Restore previous saved preferences so saved plan and settings remain consistent & untouched
+            dbInstance.updatePreferences(userId, previousPrefs);
+            res.status(422).json({
+              error: genErr.message,
+              code: 'BUDGET_INFEASIBLE',
+              minimumAchievableBasketPln: genErr.minimumAchievableBasketPln,
+              maxAllowedBudgetPln: genErr.maxAllowedBudgetPln,
+              preservedSavedPlan: true,
+            });
+            return;
+          }
+          throw genErr;
+        }
       }
       res.json(buildFullStatePayload(userId));
     } catch (err: any) {
-      res.status(400).json({ error: err.message });
+      res.status(err?.statusCode || 400).json({ error: err.message });
     }
   });
 
@@ -488,15 +546,96 @@ export function createApp(dbInstance: MealPlannerDatabase) {
       }
 
       const body = req.body || {};
-      const wizardPrefs = body.preferences && typeof body.preferences === 'object' ? body.preferences : null;
+      const wizardPrefs = body.preferences && typeof body.preferences === 'object' ? { ...body.preferences } : null;
+      if (wizardPrefs) {
+        // Generate AI Plan wizard MUST NEVER change the user's Settings region or currency
+        delete wizardPrefs.regionCode;
+        delete wizardPrefs.currencyCode;
+
+        const currentPrefs = dbInstance.getPreferences(userId);
+        const existingRegion: RegionCode = currentPrefs.regionCode || 'PL';
+        const existingCurrency: CurrencyCode =
+          currentPrefs.currencyCode || getDefaultCurrencyForRegion(existingRegion);
+
+        if (
+          wizardPrefs.preferredCuisine !== undefined &&
+          wizardPrefs.preferredCuisine !== null &&
+          !isValidCuisinePreference(wizardPrefs.preferredCuisine)
+        ) {
+          res.status(400).json({
+            error:
+              'Unsupported cuisine. Supported: any, italian, french, polish, greek, azerbaijani, spanish',
+          });
+          return;
+        }
+        if (wizardPrefs.preferredCuisine !== undefined) {
+          wizardPrefs.preferredCuisine = normalizeCuisinePreference(wizardPrefs.preferredCuisine);
+        }
+
+        if (
+          existingRegion === 'PL' &&
+          wizardPrefs.preferredSupermarket !== undefined &&
+          isLegacyPolishSupermarketSlug(wizardPrefs.preferredSupermarket)
+        ) {
+          wizardPrefs.preferredSupermarket = 'biedronka';
+        }
+        if (
+          wizardPrefs.preferredSupermarket !== undefined &&
+          !isSupermarketInRegion(wizardPrefs.preferredSupermarket, existingRegion)
+        ) {
+          res.status(400).json({
+            error: `Supermarket '${wizardPrefs.preferredSupermarket}' does not belong to your Settings region '${existingRegion}'`,
+          });
+          return;
+        }
+
+        const minBudget = existingCurrency === 'AZN' ? 15 : 20;
+        if (wizardPrefs.weeklyBudgetPln !== undefined && Number(wizardPrefs.weeklyBudgetPln) < minBudget) {
+          res.status(400).json({ error: `Weekly budget must be at least ${minBudget}` });
+          return;
+        }
+        if (
+          wizardPrefs.householdSize !== undefined &&
+          (Number(wizardPrefs.householdSize) < 1 || Number(wizardPrefs.householdSize) > 20)
+        ) {
+          res.status(400).json({ error: 'Household size must be between 1 and 20' });
+          return;
+        }
+        if (
+          wizardPrefs.planDurationDays !== undefined &&
+          (Number(wizardPrefs.planDurationDays) < 1 || Number(wizardPrefs.planDurationDays) > 7)
+        ) {
+          res.status(400).json({ error: 'Plan duration must be between 1 and 7 days' });
+          return;
+        }
+      }
+
+      const previousPrefsForGenerate = dbInstance.getPreferences(userId);
       if (wizardPrefs) {
         dbInstance.updatePreferences(userId, wizardPrefs);
       }
       const seed = typeof body.variationSeed === 'number' ? body.variationSeed : Math.floor(Math.random() * 1000) + 1;
-      await dbInstance.generateAndSaveWeeklyPlan(userId, seed);
+      try {
+        await dbInstance.generateAndSaveWeeklyPlan(userId, seed);
+      } catch (genErr: any) {
+        if (genErr?.code === 'BUDGET_INFEASIBLE') {
+          if (wizardPrefs) {
+            dbInstance.updatePreferences(userId, previousPrefsForGenerate);
+          }
+          res.status(422).json({
+            error: genErr.message,
+            code: 'BUDGET_INFEASIBLE',
+            minimumAchievableBasketPln: genErr.minimumAchievableBasketPln,
+            maxAllowedBudgetPln: genErr.maxAllowedBudgetPln,
+            preservedSavedPlan: true,
+          });
+          return;
+        }
+        throw genErr;
+      }
       res.json(buildFullStatePayload(userId));
     } catch (err: any) {
-      res.status(400).json({ error: err.message });
+      res.status(err?.statusCode || 400).json({ error: err.message });
     }
   });
 
@@ -692,7 +831,7 @@ export function createApp(dbInstance: MealPlannerDatabase) {
         regionSuitability: ['PL', 'AZ'],
         imageUrl:
           body.imageUrl ||
-          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
+          './assets/recipes/recipe-placeholder.svg',
         prepTimeMin: Number(body.prepTimeMin) || 10,
         cookTimeMin: Number(body.cookTimeMin) || 15,
         totalTimeMin: (Number(body.prepTimeMin) || 10) + (Number(body.cookTimeMin) || 15),
@@ -750,18 +889,20 @@ export function createApp(dbInstance: MealPlannerDatabase) {
 
   app.put('/api/shopping-list/settings', resolveUser, (req: AuthenticatedRequest, res: Response) => {
     const userId = req.userId!;
-    const body = req.body || {};
+    const body = { ...(req.body || {}) };
     const prefs = dbInstance.getPreferences(userId);
     const activeRegion = prefs.regionCode || 'PL';
 
-    if (
-      body.supermarketId !== undefined &&
-      !isSupermarketInRegion(body.supermarketId as SupermarketSlug, activeRegion)
-    ) {
-      res.status(400).json({
-        error: `Supermarket '${body.supermarketId}' does not belong to region '${activeRegion}'`,
-      });
-      return;
+    if (body.supermarketId !== undefined) {
+      if (activeRegion === 'PL' && isLegacyPolishSupermarketSlug(body.supermarketId)) {
+        // Legacy Polish store selection coerced to Biedronka (only available Polish store)
+        body.supermarketId = 'biedronka';
+      } else if (!isSupermarketInRegion(body.supermarketId as SupermarketSlug, activeRegion)) {
+        res.status(400).json({
+          error: `Supermarket '${body.supermarketId}' does not belong to region '${activeRegion}'`,
+        });
+        return;
+      }
     }
 
     dbInstance.setShoppingListSettings(userId, body);
@@ -876,6 +1017,75 @@ export function createApp(dbInstance: MealPlannerDatabase) {
     }
   });
 
+  // === Poland Biedronka (Glovo Warsaw) 5-Day Atomic Snapshot Endpoints ===
+  app.get('/api/monitoring/biedronka/status', (_req: Request, res: Response) => {
+    try {
+      res.json({
+        summary: dbInstance.getBiedronkaSnapshotSummary(),
+        itemsCount: dbInstance.getActiveBiedronkaSnapshotItems().length,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/monitoring/biedronka/items', (_req: Request, res: Response) => {
+    try {
+      const summary = dbInstance.getBiedronkaSnapshotSummary();
+      const items = dbInstance.getActiveBiedronkaSnapshotItems();
+      res.json({
+        supermarketId: 'biedronka',
+        summary,
+        items,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/monitoring/biedronka/product-detail/:sku', async (req: Request, res: Response) => {
+    try {
+      const sku = String(req.params.sku || '').trim();
+      const detail = await dbInstance.getOrFetchBiedronkaProductDetail(sku);
+      if (!detail) {
+        res.status(404).json({
+          error: 'Product SKU not found in active Biedronka Warsaw snapshot',
+        });
+        return;
+      }
+      res.json(detail);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to load Biedronka product detail' });
+    }
+  });
+
+  app.post('/api/monitoring/biedronka/refresh', resolveUser, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const result = await dbInstance.runResumableBiedronkaRefreshTick({
+        triggerType: 'MANUAL_API',
+        force: Boolean(req.body?.force),
+        maxSections: req.body?.maxSections ? Number(req.body.maxSections) : undefined,
+        sectionsPerTick: req.body?.sectionsPerTick ? Number(req.body.sectionsPerTick) : undefined,
+        requestDelayMs: req.body?.requestDelayMs !== undefined ? Number(req.body.requestDelayMs) : undefined,
+      });
+      res.json({
+        status: result.status,
+        activated: result.activated,
+        deferred: result.deferred,
+        deferredUntil: result.deferredUntil,
+        activeSnapshotId: result.activeSnapshotId,
+        stagingSnapshotId: result.stagingSnapshotId,
+        completedSections: result.completedSections,
+        totalSections: result.totalSections,
+        syncRun: result.syncRun,
+        summary: dbInstance.getBiedronkaSnapshotSummary(),
+        state: buildFullStatePayload(req.userId!),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // === Apply Budget Optimization Suggestion ===
   app.post('/api/budget/apply-suggestion', resolveUser, (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -888,6 +1098,26 @@ export function createApp(dbInstance: MealPlannerDatabase) {
         const plan = dbInstance.getWeeklyPlan(userId);
         const existingMeal = plan.meals.find((m) => m.id === targetPlannedMealId);
         if (existingMeal) {
+          const prefs = dbInstance.getPreferences(userId);
+          const repRecipe = dbInstance.getAllRecipesForUser(userId).find((r) => r.id === replacementRecipeId);
+          if (!repRecipe) {
+            res.status(404).json({ error: 'Replacement recipe not found' });
+            return;
+          }
+          if (repRecipe.mealType !== existingMeal.mealType) {
+            res.status(400).json({
+              error: `Replacement recipe mealType '${repRecipe.mealType}' does not match slot '${existingMeal.mealType}'`,
+            });
+            return;
+          }
+          const check = validateRecipeForUser(repRecipe, prefs, {
+            enforcePrepTime: false,
+            enforceCuisine: true,
+          });
+          if (!check.valid) {
+            res.status(400).json({ error: check.violations.join(' | ') });
+            return;
+          }
           dbInstance.replaceOrAddPlannedMeal({
             userId,
             dayIndex: existingMeal.dayIndex,

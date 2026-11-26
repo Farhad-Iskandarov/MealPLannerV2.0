@@ -8,9 +8,15 @@ import {
   CurrencyCode,
   MonitoredProductRecord,
 } from '../../shared/types';
+import type { VerifiedBiedronkaSnapshotItem } from '../monitoring/biedronkaGlovoMonitor';
+import {
+  isRegularPriceOnlyPolicyActive,
+  resolvePolicyEffectivePrice,
+  shouldShowPromoIndicators,
+} from '../../shared/pricingPolicy';
 
 export const SUPERMARKETS: Supermarket[] = [
-  // === POLAND (PL) SUPERMARKETS ===
+  // === POLAND (PL) SUPERMARKETS — Biedronka-only Poland rollout ===
   {
     id: 'biedronka',
     name: 'Biedronka',
@@ -20,116 +26,16 @@ export const SUPERMARKETS: Supermarket[] = [
     primaryColor: '#E30613',
     secondaryColor: '#FFED00',
     loyaltyProgramName: 'Karta Moja Biedronka',
-    websiteUrl: 'https://www.biedronka.pl',
-    adapterStatus: 'DEMO_FALLBACK_ACTIVE',
+    websiteUrl: 'https://glovoapp.com/en/pl/warszawa/stores/biedronka-waw',
+    adapterStatus: 'PUBLIC_CATALOGUE_CONNECTED',
     isCatalogueAvailable: true,
     lastSyncedAt: '2026-11-11T08:00:00Z',
     priceDisclaimerPl:
-      'Brak publicznego API Biedronki w czasie rzeczywistym. Prezentowane ceny są wyraźnie oznaczonymi danymi demonstracyjnymi / z gazetek promocyjnych.',
+      'Biedronka (Warszawa • Glovo) — jedyny aktywny sklep w Polsce. Odświeżanie pełnych, zweryfikowanych migawek cenowych co 5 dni w PLN.',
     priceDisclaimerEn:
-      'No public live Biedronka API is available without restricted access. Displayed prices are clearly labelled demonstration / promotional leaflet reference data.',
+      'Biedronka (Warsaw • Glovo) — the only active store in Poland. Complete validated PLN price snapshots refresh on a 5-day cadence.',
     priceDisclaimerAz:
-      'Biedronka üçün açıq real-vaxt API mövcud deyil. Göstərilən qiymətlər rəsmi reklam bukletlərinə əsaslanan nümunə kataloq məlumatlarıdır.',
-  },
-  {
-    id: 'lidl',
-    name: 'Lidl',
-    regionCode: 'PL',
-    country: 'Poland',
-    currency: 'PLN',
-    primaryColor: '#0050AA',
-    secondaryColor: '#FFF000',
-    loyaltyProgramName: 'Aplikacja Lidl Plus',
-    websiteUrl: 'https://www.lidl.pl',
-    adapterStatus: 'DEMO_FALLBACK_ACTIVE',
-    isCatalogueAvailable: true,
-    lastSyncedAt: '2026-11-11T08:00:00Z',
-    priceDisclaimerPl:
-      'Brak otwartego API cenowego Lidl Polska. Prezentowane ceny są wyraźnie oznaczonymi danymi demonstracyjnymi / z gazetek Lidl Plus.',
-    priceDisclaimerEn:
-      'No open live Lidl Poland pricing API is publicly exposed. Displayed prices are clearly labelled demonstration / Lidl Plus leaflet reference data.',
-    priceDisclaimerAz:
-      'Lidl Polşa üçün açıq qiymət API-si yoxdur. Qiymətlər Lidl Plus bukletlərinə əsaslanan nümunə kataloq məlumatlarıdır.',
-  },
-  {
-    id: 'auchan',
-    name: 'Auchan',
-    regionCode: 'PL',
-    country: 'Poland',
-    currency: 'PLN',
-    primaryColor: '#E0001A',
-    secondaryColor: '#FFFFFF',
-    loyaltyProgramName: 'Karta Skarbonka',
-    websiteUrl: 'https://zakupy.auchan.pl',
-    adapterStatus: 'DEMO_FALLBACK_ACTIVE',
-    isCatalogueAvailable: true,
-    lastSyncedAt: '2026-11-11T08:00:00Z',
-    priceDisclaimerPl:
-      'Ceny referencyjne z katalogu demonstracyjnego Auchan Polska (sklep internetowy i stacjonarny).',
-    priceDisclaimerEn:
-      'Reference prices from the Auchan Poland demonstration catalogue (online & physical store).',
-    priceDisclaimerAz:
-      'Auchan Polşa nümunə kataloqundan götürülmüş istinad qiymətləri.',
-  },
-  {
-    id: 'kaufland',
-    name: 'Kaufland',
-    regionCode: 'PL',
-    country: 'Poland',
-    currency: 'PLN',
-    primaryColor: '#E10915',
-    secondaryColor: '#FFFFFF',
-    loyaltyProgramName: 'Kaufland Card',
-    websiteUrl: 'https://www.kaufland.pl',
-    adapterStatus: 'DEMO_FALLBACK_ACTIVE',
-    isCatalogueAvailable: true,
-    lastSyncedAt: '2026-11-11T08:00:00Z',
-    priceDisclaimerPl:
-      'Ceny referencyjne z katalogu demonstracyjnego Kaufland Polska.',
-    priceDisclaimerEn:
-      'Reference prices from the Kaufland Poland demonstration catalogue.',
-    priceDisclaimerAz:
-      'Kaufland Polşa nümunə kataloqundan götürülmüş istinad qiymətləri.',
-  },
-  {
-    id: 'carrefour',
-    name: 'Carrefour',
-    regionCode: 'PL',
-    country: 'Poland',
-    currency: 'PLN',
-    primaryColor: '#004E9E',
-    secondaryColor: '#E3001B',
-    loyaltyProgramName: 'Mój Carrefour',
-    websiteUrl: 'https://www.carrefour.pl',
-    adapterStatus: 'COMING_SOON_UNAVAILABLE',
-    isCatalogueAvailable: false,
-    lastSyncedAt: '2026-11-11T08:00:00Z',
-    priceDisclaimerPl:
-      'Integracja katalogu Carrefour Polska wymaga autoryzowanego klucza partnerskiego API (Wkrótce / Niedostępne).',
-    priceDisclaimerEn:
-      'Carrefour Poland catalogue integration requires partner API credentials (Coming Soon / Unavailable).',
-    priceDisclaimerAz:
-      'Carrefour Polşa kataloq inteqrasiyası tərəfdaş API girişi tələb edir (Tezliklə / Əlçatmazdır).',
-  },
-  {
-    id: 'zabka',
-    name: 'Żabka',
-    regionCode: 'PL',
-    country: 'Poland',
-    currency: 'PLN',
-    primaryColor: '#006837',
-    secondaryColor: '#8CC63F',
-    loyaltyProgramName: 'Aplikacja Żappka',
-    websiteUrl: 'https://www.zabka.pl',
-    adapterStatus: 'COMING_SOON_UNAVAILABLE',
-    isCatalogueAvailable: false,
-    lastSyncedAt: '2026-11-11T08:00:00Z',
-    priceDisclaimerPl:
-      'Integracja cenowa sieci Żabka Polska w przygotowaniu (Wkrótce / Niedostępne).',
-    priceDisclaimerEn:
-      'Żabka Poland convenience store price feed integration is coming soon / currently unavailable.',
-    priceDisclaimerAz:
-      'Żabka Polşa mağazalar şəbəkəsi üzrə qiymət inteqrasiyası tezliklə əlavə olunacaq.',
+      'Biedronka (Varşava • Glovo) — Polşada yeganə aktiv supermarket. Təsdiqlənmiş PLN qiymət kataloqu 5 günlük intervalla yenilənir.',
   },
 
   // === AZERBAIJAN (AZ) SUPERMARKETS ===
@@ -285,64 +191,64 @@ export const CURRENT_OFFERS_PL: PromotionalBannerOffer[] = [
     currencyCode: 'PLN',
     supermarketId: 'biedronka',
     supermarketName: 'Biedronka',
-    discountBadge: '-35%',
-    titlePl: 'Pierś z kurczaka Kraina Mięs / Szynka',
-    titleEn: 'Kraina Mięs Chicken Breast / Pork Ham',
+    discountBadge: '-26%',
+    titlePl: 'Filet z piersi kurczaka Kraina Mięs 1 kg',
+    titleEn: 'Kraina Mięs Chicken Breast 1 kg',
     titleAz: 'Kraina Mięs Toyuq döş əti (1 kq)',
     productCanonical: 'chicken_breast',
-    promoPricePln: 16.99,
-    regularPricePln: 22.99,
+    promoPricePln: 22.99,
+    regularPricePln: 24.90,
     unitLabel: '1 kg',
-    loyaltyNotePl: 'Z kartą Moja Biedronka (limit 2 op.)',
-    loyaltyNoteEn: 'With Moja Biedronka card (limit 2 packs)',
-    loyaltyNoteAz: 'Moja Biedronka kartı ilə (limit 2 bağlama)',
+    loyaltyNotePl: 'Biedronka Warszawa (Glovo / Moja Biedronka)',
+    loyaltyNoteEn: 'Biedronka Warsaw (Glovo / Moja Biedronka)',
+    loyaltyNoteAz: 'Biedronka Varşava (Glovo / Moja Biedronka)',
     validUntil: '2026-11-16',
     cardBgColor: '#FFE047',
     badgeColor: '#E30613',
     imageUrl: 'https://images.unsplash.com/photo-1604503468506-a8da13d82791?auto=format&fit=crop&w=400&q=80',
   },
   {
-    id: 'offer-lidl-bananas',
+    id: 'offer-biedronka-bananas',
     regionCode: 'PL',
     currencyCode: 'PLN',
-    supermarketId: 'lidl',
-    supermarketName: 'Lidl',
-    discountBadge: '-40%',
-    titlePl: 'Banany premium luzem 1 kg',
-    titleEn: 'Premium Bananas 1 kg',
-    titleAz: 'Premium Banan 1 kq',
+    supermarketId: 'biedronka',
+    supermarketName: 'Biedronka',
+    discountBadge: '-29%',
+    titlePl: 'Banany luzem 1 kg',
+    titleEn: 'Bananas 1 kg',
+    titleAz: 'Banan 1 kq',
     productCanonical: 'banana',
-    promoPricePln: 2.99,
-    regularPricePln: 4.99,
+    promoPricePln: 4.99,
+    regularPricePln: 6.99,
     unitLabel: '1 kg',
-    loyaltyNotePl: 'Z kuponem w aplikacji Lidl Plus',
-    loyaltyNoteEn: 'With coupon in Lidl Plus app',
-    loyaltyNoteAz: 'Lidl Plus tətbiqində kuponla',
-    validUntil: '2026-11-15',
-    cardBgColor: '#0050AA',
-    badgeColor: '#E30613',
+    loyaltyNotePl: 'Biedronka Warszawa (Glovo)',
+    loyaltyNoteEn: 'Biedronka Warsaw (Glovo)',
+    loyaltyNoteAz: 'Biedronka Varşava (Glovo)',
+    validUntil: '2026-11-16',
+    cardBgColor: '#E30613',
+    badgeColor: '#1B241E',
     imageUrl: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=400&q=80',
   },
   {
-    id: 'offer-auchan-milk',
+    id: 'offer-biedronka-milk',
     regionCode: 'PL',
     currencyCode: 'PLN',
-    supermarketId: 'auchan',
-    supermarketName: 'Auchan',
-    discountBadge: '-25%',
+    supermarketId: 'biedronka',
+    supermarketName: 'Biedronka',
+    discountBadge: '-13%',
     titlePl: 'Mleko świeże 2,0% 1 L',
     titleEn: 'Fresh Milk 2.0% 1 L',
     titleAz: 'Təzə Süd 2.0% 1 L',
     productCanonical: 'milk',
-    promoPricePln: 2.99,
+    promoPricePln: 3.49,
     regularPricePln: 3.99,
     unitLabel: '1 L',
-    loyaltyNotePl: 'Z kartą Skarbonka Auchan',
-    loyaltyNoteEn: 'With Auchan Skarbonka card',
-    loyaltyNoteAz: 'Auchan Skarbonka kartı ilə',
+    loyaltyNotePl: 'Biedronka Warszawa (Glovo)',
+    loyaltyNoteEn: 'Biedronka Warsaw (Glovo)',
+    loyaltyNoteAz: 'Biedronka Varşava (Glovo)',
     validUntil: '2026-11-17',
-    cardBgColor: '#E0001A',
-    badgeColor: '#C40018',
+    cardBgColor: '#196431',
+    badgeColor: '#E30613',
     imageUrl: 'https://images.unsplash.com/photo-1563636619-e9143da7973b?auto=format&fit=crop&w=400&q=80',
   },
 ];
@@ -419,7 +325,10 @@ export const CURRENT_OFFERS_AZ: PromotionalBannerOffer[] = [
 export const CURRENT_OFFERS: PromotionalBannerOffer[] = CURRENT_OFFERS_PL;
 
 export function getPromotionalOffersForRegion(regionCode: RegionCode = 'PL'): PromotionalBannerOffer[] {
-  return regionCode === 'AZ' ? CURRENT_OFFERS_AZ : CURRENT_OFFERS_PL;
+  if (regionCode === 'AZ') {
+    return CURRENT_OFFERS_AZ;
+  }
+  return shouldShowPromoIndicators('PL', 'biedronka') ? CURRENT_OFFERS_PL : [];
 }
 
 function makePrice(
@@ -441,7 +350,13 @@ function makePrice(
     verificationStatus?: 'VERIFIED_LEAFLET_PROMO' | 'DEMONSTRATION_CATALOGUE' | 'ESTIMATED_MARKET_AVG' | 'UNAVAILABLE';
   }
 ): ProductPriceRecord {
-  const effectivePrice = promoPrice !== null ? promoPrice : regularPrice;
+  const showPromos = shouldShowPromoIndicators(regionCode, supermarketId);
+  const effectivePrice = resolvePolicyEffectivePrice(
+    regularPrice,
+    promoPrice,
+    regionCode,
+    supermarketId
+  );
   let unitPrice = effectivePrice;
   let unitPriceLabel = '';
 
@@ -460,7 +375,7 @@ function makePrice(
   }
 
   const discountPercent =
-    promoPrice !== null && regularPrice > 0
+    showPromos && promoPrice !== null && regularPrice > 0
       ? Math.round(((regularPrice - promoPrice) / regularPrice) * 100)
       : null;
 
@@ -498,7 +413,7 @@ function makePrice(
     effectivePricePln: effectivePrice,
     unitPricePln: unitPrice,
     unitPriceLabel,
-    loyaltyRequired: options?.loyaltyRequired ?? false,
+    loyaltyRequired: showPromos ? options?.loyaltyRequired ?? false : false,
     loyaltyConditionPl: options?.loyaltyConditionPl ?? null,
     loyaltyConditionEn: options?.loyaltyConditionEn ?? null,
     loyaltyConditionAz: options?.loyaltyConditionAz ?? options?.loyaltyConditionEn ?? null,
@@ -1303,45 +1218,477 @@ const RAW_REGIONAL_PRODUCTS: RawPolishProductSeed[] = [
     bazarstore: { reg: 5.49, promo: 4.49 },
     rahat: { reg: 5.29, promo: 4.49 },
   },
+  // === Verified Glovo Warsaw Biedronka Economy & Premium Staples (from active snapshot snap-bd-waw-1795454272470-iw2v) ===
+  {
+    id: 'prod-buckwheat',
+    ean: '5900497001001',
+    azEan: '4760099001001',
+    canonicalIngredient: 'buckwheat',
+    namePl: 'Plony Natury Kasza gryczana prażona 400 g',
+    nameEn: 'Roasted Buckwheat Groats (Kasza gryczana)',
+    nameAz: 'Qovrulmuş qarabaşaq yarması',
+    brand: 'Plony Natury',
+    azBrand: 'Bizim Tarla',
+    category: 'Dry Products',
+    packageSize: 400,
+    packageUnit: 'g',
+    packageLabelPl: '400 g',
+    packageLabelEn: '400 g',
+    packageLabelAz: '400 q',
+    icon: '🌾',
+    imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 3.99, promo: null },
+    lidl: { reg: 3.99, promo: null },
+    auchan: { reg: 3.99, promo: null },
+    kaufland: { reg: 3.99, promo: null },
+    bravo: { reg: 2.29, promo: null },
+    araz: { reg: 2.19, promo: null },
+    bazarstore: { reg: 2.39, promo: null },
+    rahat: { reg: 2.29, promo: null },
+  },
+  {
+    id: 'prod-chickpeas',
+    ean: '5900497001002',
+    azEan: '4760099001002',
+    canonicalIngredient: 'chickpeas',
+    namePl: 'Nasza Spiżarnia Ciecierzyca 540 g',
+    nameEn: 'Cooked Chickpeas (540 g jar)',
+    nameAz: 'Bişmiş noxud (540 q)',
+    brand: 'Nasza Spiżarnia',
+    azBrand: 'Bizim Tarla',
+    category: 'Dry Products',
+    packageSize: 540,
+    packageUnit: 'g',
+    packageLabelPl: '540 g',
+    packageLabelEn: '540 g',
+    packageLabelAz: '540 q',
+    icon: '🫘',
+    imageUrl: 'https://images.unsplash.com/photo-1515543904379-3d757afe72e4?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 6.49, promo: null },
+    lidl: { reg: 6.49, promo: null },
+    auchan: { reg: 6.49, promo: null },
+    kaufland: { reg: 6.49, promo: null },
+    bravo: { reg: 3.29, promo: null },
+    araz: { reg: 3.19, promo: null },
+    bazarstore: { reg: 3.39, promo: null },
+    rahat: { reg: 3.29, promo: null },
+  },
+  {
+    id: 'prod-sunflower-seeds',
+    ean: '5900497001003',
+    azEan: '4760099001003',
+    canonicalIngredient: 'sunflower_seeds',
+    namePl: "BakaD'Or Słonecznik łuskany 500 g",
+    nameEn: 'Shelled Sunflower Seeds (500 g)',
+    nameAz: 'Təmizlənmiş günəbaxan tumu (500 q)',
+    brand: "BakaD'Or",
+    azBrand: 'Araz',
+    category: 'Dry Products',
+    packageSize: 500,
+    packageUnit: 'g',
+    packageLabelPl: '500 g',
+    packageLabelEn: '500 g',
+    packageLabelAz: '500 q',
+    icon: '🌻',
+    imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 6.98, promo: null },
+    lidl: { reg: 6.98, promo: null },
+    auchan: { reg: 6.98, promo: null },
+    kaufland: { reg: 6.98, promo: null },
+    bravo: { reg: 3.49, promo: null },
+    araz: { reg: 3.39, promo: null },
+    bazarstore: { reg: 3.59, promo: null },
+    rahat: { reg: 3.49, promo: null },
+  },
+  {
+    id: 'prod-beets',
+    ean: '5900497001004',
+    azEan: '4760099001004',
+    canonicalIngredient: 'beets',
+    namePl: 'Buraki czerwone gotowane 500 g',
+    nameEn: 'Cooked Red Beetroot (500 g)',
+    nameAz: 'Bişmiş qırmızı çuğundur (500 q)',
+    brand: 'Biedronka',
+    azBrand: 'Yerli',
+    category: 'Fruit & Vegetables',
+    packageSize: 500,
+    packageUnit: 'g',
+    packageLabelPl: '500 g',
+    packageLabelEn: '500 g',
+    packageLabelAz: '500 q',
+    icon: '🟣',
+    imageUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 4.79, promo: null },
+    lidl: { reg: 4.79, promo: null },
+    auchan: { reg: 4.79, promo: null },
+    kaufland: { reg: 4.79, promo: null },
+    bravo: { reg: 2.19, promo: null },
+    araz: { reg: 2.09, promo: null },
+    bazarstore: { reg: 2.29, promo: null },
+    rahat: { reg: 2.19, promo: null },
+  },
+  {
+    id: 'prod-hummus',
+    ean: '5900497001005',
+    azEan: '4760099001005',
+    canonicalIngredient: 'hummus',
+    namePl: 'Go Vege Hummus orientalny 160 g',
+    nameEn: 'Oriental Chickpea Hummus (160 g)',
+    nameAz: 'Şərq üsulu humus (160 q)',
+    brand: 'Go Vege',
+    azBrand: 'Bravo',
+    category: 'Dairy',
+    packageSize: 160,
+    packageUnit: 'g',
+    packageLabelPl: '160 g',
+    packageLabelEn: '160 g',
+    packageLabelAz: '160 q',
+    icon: '🥣',
+    imageUrl: 'https://images.unsplash.com/photo-1577805947697-89e18249d767?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 4.29, promo: null },
+    lidl: { reg: 4.29, promo: null },
+    auchan: { reg: 4.29, promo: null },
+    kaufland: { reg: 4.29, promo: null },
+    bravo: { reg: 2.49, promo: null },
+    araz: { reg: 2.39, promo: null },
+    bazarstore: { reg: 2.59, promo: null },
+    rahat: { reg: 2.49, promo: null },
+  },
+  {
+    id: 'prod-wild-mushrooms',
+    ean: '5900497001006',
+    azEan: '4760099001006',
+    canonicalIngredient: 'wild_mushrooms',
+    namePl: 'Mroźna Kraina Podgrzybki krojone 250 g',
+    nameEn: 'Sliced Polish Forest Bay Boletes (Podgrzybki, 250 g)',
+    nameAz: 'Doğranmış meşə göbələyi (Podqribki, 250 q)',
+    brand: 'Mroźna Kraina',
+    azBrand: 'Bravo',
+    category: 'Frozen Products',
+    packageSize: 250,
+    packageUnit: 'g',
+    packageLabelPl: '250 g',
+    packageLabelEn: '250 g',
+    packageLabelAz: '250 q',
+    icon: '🍄',
+    imageUrl: 'https://images.unsplash.com/photo-1504545102780-2dd7ebe4c2bb?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 10.99, promo: null },
+    lidl: { reg: 10.99, promo: null },
+    auchan: { reg: 10.99, promo: null },
+    kaufland: { reg: 10.99, promo: null },
+    bravo: { reg: 5.49, promo: null },
+    araz: { reg: 5.29, promo: null },
+    bazarstore: { reg: 5.59, promo: null },
+    rahat: { reg: 5.49, promo: null },
+  },
+  {
+    id: 'prod-almonds',
+    ean: '5900497001007',
+    azEan: '4760099001007',
+    canonicalIngredient: 'almonds',
+    namePl: 'Bakello Migdały łuskane 300 g',
+    nameEn: 'Shelled Almonds (300 g)',
+    nameAz: 'Qabıqsız badam (300 q)',
+    brand: 'Bakello',
+    azBrand: 'Quba',
+    category: 'Dry Products',
+    packageSize: 300,
+    packageUnit: 'g',
+    packageLabelPl: '300 g',
+    packageLabelEn: '300 g',
+    packageLabelAz: '300 q',
+    icon: '🌰',
+    imageUrl: 'https://images.unsplash.com/photo-1508061253366-f7da158b6d46?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 16.99, promo: null },
+    lidl: { reg: 16.99, promo: null },
+    auchan: { reg: 16.99, promo: null },
+    kaufland: { reg: 16.99, promo: null },
+    bravo: { reg: 8.49, promo: null },
+    araz: { reg: 8.29, promo: null },
+    bazarstore: { reg: 8.69, promo: null },
+    rahat: { reg: 8.49, promo: null },
+  },
+  {
+    id: 'prod-cashews',
+    ean: '5900497001008',
+    azEan: '4760099001008',
+    canonicalIngredient: 'cashews',
+    namePl: 'Orzechy nerkowca ok. 300 g',
+    nameEn: 'Cashew Nuts (300 g)',
+    nameAz: 'Keşyu fındığı (300 q)',
+    brand: 'Biedronka',
+    azBrand: 'Bravo',
+    category: 'Dry Products',
+    packageSize: 300,
+    packageUnit: 'g',
+    packageLabelPl: '300 g',
+    packageLabelEn: '300 g',
+    packageLabelAz: '300 q',
+    icon: '🥜',
+    imageUrl: 'https://images.unsplash.com/photo-1508061253366-f7da158b6d46?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 16.47, promo: null },
+    lidl: { reg: 16.47, promo: null },
+    auchan: { reg: 16.47, promo: null },
+    kaufland: { reg: 16.47, promo: null },
+    bravo: { reg: 8.29, promo: null },
+    araz: { reg: 8.19, promo: null },
+    bazarstore: { reg: 8.49, promo: null },
+    rahat: { reg: 8.29, promo: null },
+  },
+  {
+    id: 'prod-hazelnuts',
+    ean: '5900497001009',
+    azEan: '4760099001009',
+    canonicalIngredient: 'hazelnuts',
+    namePl: 'Bakallino Orzechy laskowe 300 g',
+    nameEn: 'Hazelnuts (300 g)',
+    nameAz: 'Fındıq ləpəsi (300 q)',
+    brand: 'Bakallino',
+    azBrand: 'Zaqatala',
+    category: 'Dry Products',
+    packageSize: 300,
+    packageUnit: 'g',
+    packageLabelPl: '300 g',
+    packageLabelEn: '300 g',
+    packageLabelAz: '300 q',
+    icon: '🌰',
+    imageUrl: 'https://images.unsplash.com/photo-1508061253366-f7da158b6d46?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 19.89, promo: null },
+    lidl: { reg: 19.89, promo: null },
+    auchan: { reg: 19.89, promo: null },
+    kaufland: { reg: 19.89, promo: null },
+    bravo: { reg: 9.49, promo: null },
+    araz: { reg: 9.29, promo: null },
+    bazarstore: { reg: 9.69, promo: null },
+    rahat: { reg: 9.49, promo: null },
+  },
+  {
+    id: 'prod-pistachios',
+    ean: '5900497001010',
+    azEan: '4760099001010',
+    canonicalIngredient: 'pistachios',
+    namePl: "BakaD'Or Pistacje prażone solone 250 g",
+    nameEn: 'Roasted Pistachios (250 g)',
+    nameAz: 'Qovrulmuş püstə (250 q)',
+    brand: "BakaD'Or",
+    azBrand: 'Bravo',
+    category: 'Dry Products',
+    packageSize: 250,
+    packageUnit: 'g',
+    packageLabelPl: '250 g',
+    packageLabelEn: '250 g',
+    packageLabelAz: '250 q',
+    icon: '🟢',
+    imageUrl: 'https://images.unsplash.com/photo-1508061253366-f7da158b6d46?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 17.49, promo: null },
+    lidl: { reg: 17.49, promo: null },
+    auchan: { reg: 17.49, promo: null },
+    kaufland: { reg: 17.49, promo: null },
+    bravo: { reg: 8.99, promo: null },
+    araz: { reg: 8.79, promo: null },
+    bazarstore: { reg: 9.19, promo: null },
+    rahat: { reg: 8.99, promo: null },
+  },
+  {
+    id: 'prod-avocado',
+    ean: '5900497001011',
+    azEan: '4760099001011',
+    canonicalIngredient: 'avocado',
+    namePl: 'Awokado Hass 500 g',
+    nameEn: 'Hass Avocado (500 g)',
+    nameAz: 'Hass avokado (500 q)',
+    brand: 'Biedronka',
+    azBrand: 'Bravo',
+    category: 'Fruit & Vegetables',
+    packageSize: 500,
+    packageUnit: 'g',
+    packageLabelPl: '500 g',
+    packageLabelEn: '500 g',
+    packageLabelAz: '500 q',
+    icon: '🥑',
+    imageUrl: 'https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 12.99, promo: null },
+    lidl: { reg: 12.99, promo: null },
+    auchan: { reg: 12.99, promo: null },
+    kaufland: { reg: 12.99, promo: null },
+    bravo: { reg: 6.49, promo: null },
+    araz: { reg: 6.29, promo: null },
+    bazarstore: { reg: 6.69, promo: null },
+    rahat: { reg: 6.49, promo: null },
+  },
+  {
+    id: 'prod-blueberries',
+    ean: '5900497001012',
+    azEan: '4760099001012',
+    canonicalIngredient: 'blueberries',
+    namePl: 'Nasza Spiżarnia Borówka 300 g',
+    nameEn: 'Blueberries (Borówka, 300 g)',
+    nameAz: 'Qaragilə (300 q)',
+    brand: 'Nasza Spiżarnia',
+    azBrand: 'Bravo',
+    category: 'Fruit & Vegetables',
+    packageSize: 300,
+    packageUnit: 'g',
+    packageLabelPl: '300 g',
+    packageLabelEn: '300 g',
+    packageLabelAz: '300 q',
+    icon: '🫐',
+    imageUrl: 'https://images.unsplash.com/photo-1498557850523-fd3d118b962e?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 8.99, promo: null },
+    lidl: { reg: 8.99, promo: null },
+    auchan: { reg: 8.99, promo: null },
+    kaufland: { reg: 8.99, promo: null },
+    bravo: { reg: 4.99, promo: null },
+    araz: { reg: 4.89, promo: null },
+    bazarstore: { reg: 5.19, promo: null },
+    rahat: { reg: 4.99, promo: null },
+  },
+  {
+    id: 'prod-sun-dried-tomatoes',
+    ean: '5900497001013',
+    azEan: '4760099001013',
+    canonicalIngredient: 'sun_dried_tomatoes',
+    namePl: 'Nasza Spiżarnia Pomidory suszone z pestkami dyni i ziołami 270 g',
+    nameEn: 'Sun-Dried Tomatoes with Pumpkin Seeds & Herbs (270 g)',
+    nameAz: 'Balqabaq tumlu və otlu qurudulmuş pomidor (270 q)',
+    brand: 'Nasza Spiżarnia',
+    azBrand: 'Bravo',
+    category: 'Dry Products',
+    packageSize: 270,
+    packageUnit: 'g',
+    packageLabelPl: '270 g',
+    packageLabelEn: '270 g',
+    packageLabelAz: '270 q',
+    icon: '🍅',
+    imageUrl: 'https://images.unsplash.com/photo-1546094096-0df4bcaaa337?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 7.49, promo: null },
+    lidl: { reg: 7.49, promo: null },
+    auchan: { reg: 7.49, promo: null },
+    kaufland: { reg: 7.49, promo: null },
+    bravo: { reg: 3.99, promo: null },
+    araz: { reg: 3.89, promo: null },
+    bazarstore: { reg: 4.19, promo: null },
+    rahat: { reg: 3.99, promo: null },
+  },
+  {
+    id: 'prod-tofu-pesto',
+    ean: '5900497001014',
+    azEan: '4760099001014',
+    canonicalIngredient: 'tofu_pesto',
+    namePl: 'Go Vege Pesto z tofu 190 g',
+    nameEn: 'Plant-Based Tofu Pesto (190 g)',
+    nameAz: 'Bitki mənşəli tofu pesto (190 q)',
+    brand: 'Go Vege',
+    azBrand: 'Bravo',
+    category: 'Dry Products',
+    packageSize: 190,
+    packageUnit: 'g',
+    packageLabelPl: '190 g',
+    packageLabelEn: '190 g',
+    packageLabelAz: '190 q',
+    icon: '🌿',
+    imageUrl: 'https://images.unsplash.com/photo-1577805947697-89e18249d767?auto=format&fit=crop&w=300&q=80',
+    biedronka: { reg: 6.99, promo: null },
+    lidl: { reg: 6.99, promo: null },
+    auchan: { reg: 6.99, promo: null },
+    kaufland: { reg: 6.99, promo: null },
+    bravo: { reg: 3.79, promo: null },
+    araz: { reg: 3.69, promo: null },
+    bazarstore: { reg: 3.89, promo: null },
+    rahat: { reg: 3.79, promo: null },
+  },
 ];
 
-export const PL_CATALOGUE_PRODUCTS: SupermarketProduct[] = RAW_REGIONAL_PRODUCTS.map((raw) => ({
-  id: raw.id,
-  ean: raw.ean,
-  canonicalIngredient: raw.canonicalIngredient,
-  regionCode: 'PL',
-  currencyCode: 'PLN',
-  namePl: raw.namePl,
-  nameEn: raw.nameEn,
-  nameAz: raw.nameAz,
-  brand: raw.brand,
-  category: raw.category,
-  packageSize: raw.packageSize,
-  packageUnit: raw.packageUnit,
-  packageLabelPl: raw.packageLabelPl,
-  packageLabelEn: raw.packageLabelEn,
-  packageLabelAz: raw.packageLabelAz,
-  icon: raw.icon,
-  imageUrl: raw.imageUrl,
-  prices: {
-    biedronka: makePrice(raw.id, 'biedronka', 'PL', 'PLN', raw.biedronka.reg, raw.biedronka.promo, raw.packageSize, raw.packageUnit, {
-      loyaltyRequired: Boolean(raw.biedronka.loyaltyPl),
-      loyaltyConditionPl: raw.biedronka.loyaltyPl,
-      loyaltyConditionEn: raw.biedronka.loyaltyEn,
-      promoValidUntil: raw.biedronka.validUntil ?? '2026-11-16',
-    }),
-    lidl: makePrice(raw.id, 'lidl', 'PL', 'PLN', raw.lidl.reg, raw.lidl.promo, raw.packageSize, raw.packageUnit, {
-      loyaltyRequired: Boolean(raw.lidl.loyaltyPl),
-      loyaltyConditionPl: raw.lidl.loyaltyPl,
-      loyaltyConditionEn: raw.lidl.loyaltyEn,
-      promoValidUntil: raw.lidl.validUntil ?? '2026-11-16',
-    }),
-    auchan: makePrice(raw.id, 'auchan', 'PL', 'PLN', raw.auchan.reg, raw.auchan.promo, raw.packageSize, raw.packageUnit, {
-      storeChannel: 'ONLINE_AND_STORE',
-    }),
-    kaufland: makePrice(raw.id, 'kaufland', 'PL', 'PLN', raw.kaufland.reg, raw.kaufland.promo, raw.packageSize, raw.packageUnit),
+/**
+ * Snapshot-only Polish catalogue entries for authentic specialty ingredients
+ * (pearl barley groats for traditional Polish Krupnik; Arborio risotto rice for Italian Risotto).
+ * Intentionally carry NO baseline/demo prices (`prices: {}`) so they remain truthfully unpriced
+ * until a complete, validated Glovo Warsaw Biedronka snapshot supplies a verified match.
+ */
+const SNAPSHOT_ONLY_PL_PRODUCTS: Array<{
+  id: string;
+  canonicalIngredient: string;
+  namePl: string;
+  nameEn: string;
+  nameAz: string;
+  category: ShoppingCategory;
+  packageUnit: 'g' | 'ml' | 'pcs';
+  icon: string;
+  imageUrl: string;
+}> = [
+  {
+    id: 'prod-pearl-barley',
+    canonicalIngredient: 'pearl_barley',
+    namePl: 'Kasza jęczmienna perłowa',
+    nameEn: 'Pearl barley groats',
+    nameAz: 'Arpa yarması (perlovka)',
+    category: 'Dry Products',
+    packageUnit: 'g',
+    icon: '🌾',
+    imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=300&q=80',
   },
-}));
+  {
+    id: 'prod-risotto-rice',
+    canonicalIngredient: 'risotto_rice',
+    namePl: 'Ryż do risotto (Arborio)',
+    nameEn: 'Arborio risotto rice',
+    nameAz: 'Rizotto düyüsü (Arborio)',
+    category: 'Dry Products',
+    packageUnit: 'g',
+    icon: '🍚',
+    imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=300&q=80',
+  },
+];
+
+export const PL_CATALOGUE_PRODUCTS: SupermarketProduct[] = [
+  ...RAW_REGIONAL_PRODUCTS.map((raw) => ({
+    id: raw.id,
+    ean: raw.ean,
+    canonicalIngredient: raw.canonicalIngredient,
+    regionCode: 'PL' as RegionCode,
+    currencyCode: 'PLN' as CurrencyCode,
+    namePl: raw.namePl,
+    nameEn: raw.nameEn,
+    nameAz: raw.nameAz,
+    brand: raw.brand,
+    category: raw.category,
+    packageSize: raw.packageSize,
+    packageUnit: raw.packageUnit,
+    packageLabelPl: raw.packageLabelPl,
+    packageLabelEn: raw.packageLabelEn,
+    packageLabelAz: raw.packageLabelAz,
+    icon: raw.icon,
+    imageUrl: raw.imageUrl,
+    prices: {
+      biedronka: makePrice(raw.id, 'biedronka', 'PL', 'PLN', raw.biedronka.reg, raw.biedronka.promo, raw.packageSize, raw.packageUnit, {
+        loyaltyRequired: Boolean(raw.biedronka.loyaltyPl),
+        loyaltyConditionPl: raw.biedronka.loyaltyPl,
+        loyaltyConditionEn: raw.biedronka.loyaltyEn,
+        promoValidUntil: raw.biedronka.validUntil ?? '2026-11-16',
+      }),
+    },
+  })),
+  ...SNAPSHOT_ONLY_PL_PRODUCTS.map((item) => ({
+    id: item.id,
+    ean: '',
+    canonicalIngredient: item.canonicalIngredient,
+    regionCode: 'PL' as RegionCode,
+    currencyCode: 'PLN' as CurrencyCode,
+    namePl: item.namePl,
+    nameEn: item.nameEn,
+    nameAz: item.nameAz,
+    brand: '',
+    category: item.category,
+    packageSize: 0,
+    packageUnit: item.packageUnit,
+    packageLabelPl: '',
+    packageLabelEn: '',
+    packageLabelAz: '',
+    icon: item.icon,
+    imageUrl: item.imageUrl,
+    prices: {},
+  })),
+];
 
 export const AZ_CATALOGUE_PRODUCTS: SupermarketProduct[] = RAW_REGIONAL_PRODUCTS.map((raw) => {
   const azId = `az-${raw.id}`;
@@ -1436,6 +1783,7 @@ export function applyMonitoredPricesToCatalogue(
         : ['biedronka', 'lidl', 'auchan', 'kaufland'];
 
     for (const store of stores) {
+      if (prod.regionCode === 'PL' && store !== 'biedronka') continue;
       const candidates = byStoreAndCanonical.get(
         `${store}:${prod.canonicalIngredient.toLowerCase()}`
       );
@@ -1525,5 +1873,192 @@ export function applyMonitoredPricesToCatalogue(
         priceAgeHours: chosen.priceAgeHours,
       };
     }
+  }
+}
+
+let activeVerifiedBiedronkaSnapshotId: string | null = null;
+let activeVerifiedBiedronkaSnapshotAt: string | null = null;
+let activeVerifiedBiedronkaItems: VerifiedBiedronkaSnapshotItem[] = [];
+let activeVerifiedBiedronkaBySku = new Map<string, VerifiedBiedronkaSnapshotItem>();
+
+export function getActiveVerifiedBiedronkaSnapshot(): {
+  snapshotId: string | null;
+  activatedAt: string | null;
+  items: VerifiedBiedronkaSnapshotItem[];
+} {
+  return {
+    snapshotId: activeVerifiedBiedronkaSnapshotId,
+    activatedAt: activeVerifiedBiedronkaSnapshotAt,
+    items: activeVerifiedBiedronkaItems,
+  };
+}
+
+export function getActiveVerifiedBiedronkaItemBySku(
+  sku: string | null | undefined
+): VerifiedBiedronkaSnapshotItem | null {
+  if (!sku) return null;
+  return activeVerifiedBiedronkaBySku.get(String(sku)) ?? null;
+}
+
+export function clearVerifiedBiedronkaSnapshot(): void {
+  activeVerifiedBiedronkaSnapshotId = null;
+  activeVerifiedBiedronkaSnapshotAt = null;
+  activeVerifiedBiedronkaItems = [];
+  activeVerifiedBiedronkaBySku = new Map();
+  // Restore baseline PL_CATALOGUE_PRODUCTS prices & metadata from RAW_REGIONAL_PRODUCTS
+  for (let i = 0; i < RAW_REGIONAL_PRODUCTS.length; i++) {
+    const raw = RAW_REGIONAL_PRODUCTS[i];
+    const prod = PL_CATALOGUE_PRODUCTS[i];
+    if (!prod) continue;
+    prod.ean = raw.ean;
+    prod.namePl = raw.namePl;
+    prod.packageSize = raw.packageSize;
+    prod.packageUnit = raw.packageUnit;
+    prod.packageLabelPl = raw.packageLabelPl;
+    prod.prices = {
+      biedronka: makePrice(raw.id, 'biedronka', 'PL', 'PLN', raw.biedronka.reg, raw.biedronka.promo, raw.packageSize, raw.packageUnit, {
+        loyaltyRequired: Boolean(raw.biedronka.loyaltyPl),
+        loyaltyConditionPl: raw.biedronka.loyaltyPl,
+        loyaltyConditionEn: raw.biedronka.loyaltyEn,
+        promoValidUntil: raw.biedronka.validUntil ?? '2026-11-16',
+      }),
+    };
+  }
+  // Restore snapshot-only PL entries back to unpriced (never fabricate demo prices)
+  for (const snapOnly of SNAPSHOT_ONLY_PL_PRODUCTS) {
+    const prod = PL_CATALOGUE_PRODUCTS.find((p) => p.id === snapOnly.id);
+    if (!prod) continue;
+    prod.ean = '';
+    prod.namePl = snapOnly.namePl;
+    prod.packageSize = 0;
+    prod.packageUnit = snapOnly.packageUnit;
+    prod.packageLabelPl = '';
+    prod.prices = {};
+  }
+}
+
+/**
+ * Applies a complete, validated Glovo Warsaw Biedronka snapshot to the in-memory PL catalogue.
+ * Only verified items with conservative canonical matches and compatible dimensions update prices;
+ * canonicals missing from the verified snapshot are marked unavailable/unpriced rather than fabricated.
+ */
+export function applyVerifiedBiedronkaSnapshotToCatalogue(
+  items: VerifiedBiedronkaSnapshotItem[],
+  meta: { snapshotId: string | null; activatedAt: string | null; referenceNowMs?: number }
+): void {
+  if (!meta.snapshotId || !items || items.length === 0) {
+    return;
+  }
+
+  activeVerifiedBiedronkaSnapshotId = meta.snapshotId;
+  activeVerifiedBiedronkaSnapshotAt = meta.activatedAt;
+  activeVerifiedBiedronkaItems = items;
+  activeVerifiedBiedronkaBySku = new Map(items.map((it) => [it.sku, it]));
+
+  const bdMeta = SUPERMARKETS.find((s) => s.id === 'biedronka');
+  if (bdMeta && meta.activatedAt) {
+    bdMeta.lastSyncedAt = meta.activatedAt;
+    bdMeta.adapterStatus = 'PUBLIC_CATALOGUE_CONNECTED';
+  }
+
+  const nowMs = meta.referenceNowMs ?? Date.now();
+  const byCanonical = new Map<string, VerifiedBiedronkaSnapshotItem[]>();
+  for (const item of items) {
+    if (!item.canonicalIngredient || item.matchConfidence !== 'HIGH') continue;
+    if (!item.packageSize || !item.packageUnit || item.unitPricePln === null) continue;
+    const key = item.canonicalIngredient.toLowerCase();
+    const list = byCanonical.get(key) || [];
+    list.push(item);
+    byCanonical.set(key, list);
+  }
+
+  for (const prod of PL_CATALOGUE_PRODUCTS) {
+    const candidates = byCanonical.get(prod.canonicalIngredient.toLowerCase()) || [];
+    // Conservative dimension match: only accept verified items with the exact same packageUnit
+    const dimCompatible = candidates.filter((c) => c.packageUnit === prod.packageUnit && c.isAvailable);
+
+    if (dimCompatible.length === 0) {
+      // Mark as unpriced/unavailable in the active verified snapshot so shopping list leaves it unpriced
+      prod.prices.biedronka = undefined;
+      continue;
+    }
+
+    // Deterministic best-value selection using policy-effective unit price, then SKU tie-breaker
+    const computePolicyUnit = (item: VerifiedBiedronkaSnapshotItem) => {
+      const pPrice = resolvePolicyEffectivePrice(
+        item.regularPricePln,
+        item.promoPricePln,
+        'PL',
+        'biedronka'
+      );
+      const sz = item.packageSize!;
+      const u = item.packageUnit!;
+      const unitVal =
+        u === 'g' || u === 'ml'
+          ? Number(((pPrice / sz) * 1000).toFixed(2))
+          : Number((pPrice / sz).toFixed(2));
+      const unitSuffix = u === 'g' ? 'kg' : u === 'ml' ? 'L' : 'szt.';
+      return {
+        policyPrice: pPrice,
+        unitPricePln: unitVal,
+        unitPriceLabel: `${unitVal.toFixed(2).replace('.', ',')} zł / ${unitSuffix}`,
+      };
+    };
+
+    dimCompatible.sort((a, b) => {
+      const ua = computePolicyUnit(a).unitPricePln;
+      const ub = computePolicyUnit(b).unitPricePln;
+      return ua - ub || a.sku.localeCompare(b.sku);
+    });
+    const chosen = dimCompatible[0];
+    const pkgSize = chosen.packageSize!;
+    const pkgUnit = chosen.packageUnit!;
+    const policyCalc = computePolicyUnit(chosen);
+    const showPromos = shouldShowPromoIndicators('PL', 'biedronka');
+    const discountPercent =
+      showPromos && chosen.promoPricePln !== null && chosen.regularPricePln > 0
+        ? Math.round(((chosen.regularPricePln - chosen.promoPricePln) / chosen.regularPricePln) * 100)
+        : null;
+
+    const timestampForAge = chosen.observedAt || chosen.fetchedAt;
+    const checkedMs = timestampForAge ? new Date(timestampForAge).getTime() : NaN;
+    const ageHours = Number.isFinite(checkedMs)
+      ? Math.max(0, Number(((nowMs - checkedMs) / (1000 * 3600)).toFixed(1)))
+      : 0;
+    const isOutdated = ageHours > 120; // 5-day freshness cadence
+
+    prod.ean = chosen.sku;
+    prod.namePl = chosen.namePl;
+    prod.packageSize = pkgSize;
+    prod.packageUnit = pkgUnit;
+    prod.packageLabelPl = chosen.packageLabelPl || prod.packageLabelPl;
+    prod.prices.biedronka = {
+      id: `price-${prod.id}-biedronka-${chosen.sku}`,
+      productId: prod.id,
+      supermarketId: 'biedronka',
+      regionCode: 'PL',
+      country: 'Poland',
+      currencyCode: 'PLN',
+      regularPricePln: chosen.regularPricePln,
+      promoPricePln: chosen.promoPricePln,
+      effectivePricePln: policyCalc.policyPrice,
+      unitPricePln: policyCalc.unitPricePln,
+      unitPriceLabel: policyCalc.unitPriceLabel,
+      loyaltyRequired: false,
+      loyaltyConditionPl: null,
+      loyaltyConditionEn: null,
+      loyaltyConditionAz: null,
+      promoValidUntil: null,
+      discountPercent,
+      storeChannel: 'ONLINE_AND_STORE',
+      storeLocation: chosen.storeLocation,
+      sourceName: chosen.sourceName,
+      sourceUrl: chosen.glovoProductUrl || chosen.sourceUrl,
+      verificationStatus: isOutdated ? 'OUTDATED_PRICE' : 'LIVE_MONITORED_CATALOGUE',
+      lastUpdatedAt: chosen.observedAt || chosen.fetchedAt,
+      isAvailable: chosen.isAvailable,
+      isOutdated,
+      priceAgeHours: ageHours,
+    };
   }
 }

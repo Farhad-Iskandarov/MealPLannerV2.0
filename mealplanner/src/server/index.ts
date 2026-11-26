@@ -13,14 +13,16 @@ async function startServer() {
   const { createApp } = await import('./app');
   const { assertAuthConfiguration } = await import('./auth/authService');
   const { startBazarstorePriceScheduler } = await import('./monitoring/bazarstoreMonitor');
+  const { startBiedronkaPriceScheduler } = await import('./monitoring/biedronkaGlovoMonitor');
 
   assertAuthConfiguration();
   const port = Number(process.env.PORT) || 3000;
   const dbInstance = new MealPlannerDatabase(process.env.DATABASE_PATH || './data/mealplanner.sqlite');
   await dbInstance.seedIfEmpty({ seedDemoUser: process.env.SEED_DEMO_USER !== 'false' });
 
-  // Start automated 24-hour Bazarstore price monitoring background scheduler
+  // Start automated 24-hour Bazarstore (AZ) and 5-day Biedronka Warsaw (PL) price monitoring schedulers
   startBazarstorePriceScheduler(dbInstance);
+  startBiedronkaPriceScheduler(dbInstance);
 
   const app = createApp(dbInstance);
   app.listen(port, '0.0.0.0', () => {

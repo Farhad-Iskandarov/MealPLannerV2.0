@@ -214,7 +214,7 @@ export class SupermarketRegistry {
       const storePrices: Partial<Record<SupermarketSlug, ProductPriceRecord | null>> =
         regionCode === 'AZ'
           ? { bravo, araz, bazarstore, rahat }
-          : { biedronka: b, lidl: l, auchan: a, kaufland: k };
+          : { biedronka: b };
 
       const candidates = Object.values(storePrices).filter(
         (x): x is ProductPriceRecord => x !== null && x !== undefined

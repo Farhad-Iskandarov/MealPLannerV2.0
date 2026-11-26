@@ -23,12 +23,17 @@ import {
   PriceHistoryEntry,
   PriceSyncRunRecord,
   PriceMonitoringSummary,
+  BiedronkaSnapshotSummary,
+  BiedronkaProductDetail,
+  BiedronkaNutritionRow,
 } from '../../shared/types';
 import {
   SUPERMARKETS,
   ALL_CATALOGUE_PRODUCTS,
   AZ_CATALOGUE_PRODUCTS,
   applyMonitoredPricesToCatalogue,
+  applyVerifiedBiedronkaSnapshotToCatalogue,
+  clearVerifiedBiedronkaSnapshot,
 } from '../supermarkets/catalogueData';
 import {
   BAZARSTORE_PRIMARY_URL,
@@ -41,6 +46,32 @@ import {
   computePriceStaleness,
   fetchLiveBazarstoreCatalogue,
 } from '../monitoring/bazarstoreMonitor';
+import {
+  GLOVO_BIEDRONKA_SOURCE_NAME,
+  GLOVO_BIEDRONKA_STORE_LOCATION,
+  GLOVO_BIEDRONKA_STORE_URL,
+  BIEDRONKA_REFRESH_CADENCE_DAYS,
+  BIEDRONKA_REFRESH_INTERVAL_MS,
+  BIEDRONKA_STALE_THRESHOLD_HOURS,
+  DEFAULT_BIEDRONKA_MAX_SECTIONS,
+  DEFAULT_BIEDRONKA_SECTIONS_PER_TICK,
+  DEFAULT_BIEDRONKA_INITIAL_BACKOFF_MS,
+  DEFAULT_BIEDRONKA_MAX_BACKOFF_MS,
+  VerifiedBiedronkaSnapshotItem,
+  GlovoFetchSnapshotResult,
+  fetchGlovoBiedronkaWarsawSnapshot,
+  discoverGlovoBiedronkaSections,
+  fetchGlovoSectionsBatch,
+  buildGlovoProductUrl,
+  fetchGlovoBiedronkaProductDetail,
+  matchConservativePolishCanonical,
+  validateBiedronkaProductIdentity,
+} from '../monitoring/biedronkaGlovoMonitor';
+import { resolvePolicyEffectivePrice } from '../../shared/pricingPolicy';
+import {
+  isValidCuisinePreference,
+  normalizeCuisinePreference,
+} from '../../shared/cuisineConfig';
 import { SEED_RECIPES } from '../recipes/recipeSeedData';
 import { hashPassword } from '../auth/authService';
 import {
@@ -52,7 +83,10 @@ import {
   generateValidatedWeeklyMealPlan,
   getRecipeBaseCostForCurrency,
 } from '../ai/aiMealPlanner';
-import { validateRecipeForUser } from '../validation/mealValidator';
+import {
+  validateRecipeForUser,
+  collectHardExclusionTerms,
+} from '../validation/mealValidator';
 import {
   getDefaultCurrencyForRegion,
   resolveValidSupermarketForRegion,
@@ -432,6 +466,91 @@ export class MealPlannerDatabase {
         completed_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS biedronka_snapshots (
+        id TEXT PRIMARY KEY,
+        source_name TEXT NOT NULL,
+        store_location TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        status TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        total_sections INTEGER NOT NULL DEFAULT 0,
+        succeeded_sections INTEGER NOT NULL DEFAULT 0,
+        failed_sections INTEGER NOT NULL DEFAULT 0,
+        products_count INTEGER NOT NULL DEFAULT 0,
+        matched_count INTEGER NOT NULL DEFAULT 0,
+        error_summary TEXT,
+        next_retry_at TEXT,
+        backoff_ms INTEGER NOT NULL DEFAULT 0,
+        fetched_at TEXT NOT NULL,
+        activated_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS biedronka_staging_sections (
+        snapshot_id TEXT NOT NULL REFERENCES biedronka_snapshots(id) ON DELETE CASCADE,
+        section_index INTEGER NOT NULL,
+        path TEXT NOT NULL,
+        section_name TEXT NOT NULL,
+        section_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        price_cards INTEGER NOT NULL DEFAULT 0,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (snapshot_id, section_index)
+      );
+
+      CREATE TABLE IF NOT EXISTS biedronka_snapshot_items (
+        id TEXT PRIMARY KEY,
+        snapshot_id TEXT NOT NULL REFERENCES biedronka_snapshots(id) ON DELETE CASCADE,
+        sku TEXT NOT NULL,
+        name_pl TEXT NOT NULL,
+        canonical_ingredient TEXT,
+        match_confidence TEXT NOT NULL DEFAULT 'UNCERTAIN',
+        category TEXT NOT NULL DEFAULT 'Other',
+        regular_price_pln REAL NOT NULL,
+        promo_price_pln REAL,
+        effective_price_pln REAL NOT NULL,
+        package_size REAL,
+        package_unit TEXT,
+        package_label_pl TEXT,
+        unit_price_pln REAL,
+        unit_price_label TEXT,
+        sections_json TEXT NOT NULL DEFAULT '[]',
+        is_available INTEGER NOT NULL DEFAULT 1,
+        source_name TEXT NOT NULL,
+        store_location TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        verification_status TEXT NOT NULL DEFAULT 'LIVE_MONITORED_CATALOGUE',
+        fetched_at TEXT NOT NULL,
+        product_id TEXT,
+        external_product_id TEXT,
+        store_product_id TEXT,
+        store_id TEXT,
+        store_address_id TEXT,
+        glovo_product_url TEXT,
+        observed_at TEXT,
+        UNIQUE(snapshot_id, sku)
+      );
+
+      CREATE TABLE IF NOT EXISTS biedronka_product_details (
+        sku TEXT PRIMARY KEY,
+        product_id TEXT,
+        external_product_id TEXT,
+        store_product_id TEXT,
+        store_id TEXT,
+        store_address_id TEXT,
+        description TEXT,
+        ingredients TEXT,
+        nutrition_basis TEXT,
+        nutrition_rows_json TEXT NOT NULL DEFAULT '[]',
+        country_of_origin TEXT,
+        image_url TEXT,
+        glovo_product_url TEXT,
+        fetched_at TEXT,
+        next_retry_at TEXT,
+        last_error TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_products_canonical ON products(canonical_ingredient);
       CREATE INDEX IF NOT EXISTS idx_product_prices_store ON product_prices(supermarket_id, product_id);
       CREATE INDEX IF NOT EXISTS idx_planned_meals_user_day ON planned_meals(user_id, day_index);
@@ -442,6 +561,8 @@ export class MealPlannerDatabase {
       CREATE INDEX IF NOT EXISTS idx_monitored_store_canonical ON monitored_products(supermarket_id, canonical_ingredient);
       CREATE INDEX IF NOT EXISTS idx_monitored_history_prod ON monitored_price_history(monitored_product_id, recorded_at DESC);
       CREATE INDEX IF NOT EXISTS idx_price_sync_runs_store ON price_sync_runs(supermarket_id, completed_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_biedronka_snapshots_active ON biedronka_snapshots(is_active, activated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_biedronka_items_snap_canon ON biedronka_snapshot_items(snapshot_id, canonical_ingredient);
     `);
 
     // Safe non-destructive migrations for existing SQLite databases on disk
@@ -454,6 +575,19 @@ export class MealPlannerDatabase {
     this.ensureColumn('preferences', 'plan_duration_days', 'INTEGER NOT NULL DEFAULT 7');
     this.ensureColumn('preferences', 'food_vibes_json', "TEXT NOT NULL DEFAULT '[]'");
     this.ensureColumn('preferences', 'custom_food_vibes_json', "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureColumn('preferences', 'likes_json', "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureColumn('preferences', 'preferred_cuisine', "TEXT NOT NULL DEFAULT 'any'");
+    this.ensureColumn('weekly_plans', 'no_safe_slots_json', "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureColumn('recipes', 'cuisine', 'TEXT');
+    this.ensureColumn('biedronka_snapshots', 'next_retry_at', 'TEXT');
+    this.ensureColumn('biedronka_snapshots', 'backoff_ms', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('biedronka_snapshot_items', 'product_id', 'TEXT');
+    this.ensureColumn('biedronka_snapshot_items', 'external_product_id', 'TEXT');
+    this.ensureColumn('biedronka_snapshot_items', 'store_product_id', 'TEXT');
+    this.ensureColumn('biedronka_snapshot_items', 'store_id', 'TEXT');
+    this.ensureColumn('biedronka_snapshot_items', 'store_address_id', 'TEXT');
+    this.ensureColumn('biedronka_snapshot_items', 'glovo_product_url', 'TEXT');
+    this.ensureColumn('biedronka_snapshot_items', 'observed_at', 'TEXT');
     this.ensureColumn('supermarkets', 'region_code', "TEXT NOT NULL DEFAULT 'PL'");
     this.ensureColumn('products', 'region_code', "TEXT NOT NULL DEFAULT 'PL'");
     this.ensureColumn('products', 'currency_code', "TEXT NOT NULL DEFAULT 'PLN'");
@@ -742,17 +876,48 @@ export class MealPlannerDatabase {
 
   public insertRecipeRecord(r: Recipe): void {
     const now = new Date().toISOString();
+    // Use UPSERT (ON CONFLICT DO UPDATE) rather than INSERT OR REPLACE so updating seed recipes
+    // NEVER triggers ON DELETE CASCADE on planned_meals or favourite_recipes!
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO recipes (
+        `INSERT INTO recipes (
           id, slug, author_user_id, title_pl, title_en, title_az,
           description_pl, description_en, description_az,
-          meal_type, category, region_suitability_json, image_url,
+          meal_type, category, cuisine, region_suitability_json, image_url,
           prep_time_min, cook_time_min, total_time_min,
           difficulty, base_servings, estimated_cost_pln, estimated_cost_azn,
           nutrition_json, dietary_tags_json, allergens_json, equipment_json,
           instructions_pl_json, instructions_en_json, instructions_az_json, is_custom, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          slug = excluded.slug,
+          author_user_id = excluded.author_user_id,
+          title_pl = excluded.title_pl,
+          title_en = excluded.title_en,
+          title_az = excluded.title_az,
+          description_pl = excluded.description_pl,
+          description_en = excluded.description_en,
+          description_az = excluded.description_az,
+          meal_type = excluded.meal_type,
+          category = excluded.category,
+          cuisine = excluded.cuisine,
+          region_suitability_json = excluded.region_suitability_json,
+          image_url = excluded.image_url,
+          prep_time_min = excluded.prep_time_min,
+          cook_time_min = excluded.cook_time_min,
+          total_time_min = excluded.total_time_min,
+          difficulty = excluded.difficulty,
+          base_servings = excluded.base_servings,
+          estimated_cost_pln = excluded.estimated_cost_pln,
+          estimated_cost_azn = excluded.estimated_cost_azn,
+          nutrition_json = excluded.nutrition_json,
+          dietary_tags_json = excluded.dietary_tags_json,
+          allergens_json = excluded.allergens_json,
+          equipment_json = excluded.equipment_json,
+          instructions_pl_json = excluded.instructions_pl_json,
+          instructions_en_json = excluded.instructions_en_json,
+          instructions_az_json = excluded.instructions_az_json,
+          is_custom = excluded.is_custom`
       )
       .run(
         r.id,
@@ -766,6 +931,7 @@ export class MealPlannerDatabase {
         r.descriptionAz || r.descriptionEn,
         r.mealType,
         r.category,
+        r.cuisine ?? null,
         JSON.stringify(r.regionSuitability || ['PL', 'AZ']),
         r.imageUrl,
         r.prepTimeMin,
@@ -960,12 +1126,17 @@ export class MealPlannerDatabase {
       householdSize: row.household_size,
       weeklyBudgetPln: row.weekly_budget_pln,
       planDurationDays: row.plan_duration_days || 7,
-      preferredSupermarket: row.preferred_supermarket as SupermarketSlug,
+      preferredCuisine: normalizeCuisinePreference(row.preferred_cuisine),
+      preferredSupermarket: resolveValidSupermarketForRegion(
+        row.preferred_supermarket as SupermarketSlug,
+        regionCode
+      ),
       dietaryRestrictions: JSON.parse(row.dietary_restrictions_json || '[]'),
       customRestrictions: JSON.parse(row.custom_restrictions_json || '[]'),
       allergies: JSON.parse(row.allergies_json || '[]'),
       excludedIngredients: JSON.parse(row.excluded_ingredients_json || '[]'),
       dislikes: JSON.parse(row.dislikes_json || '[]'),
+      likes: JSON.parse(row.likes_json || '[]'),
       foodVibes: JSON.parse(row.food_vibes_json || '[]'),
       customFoodVibes: JSON.parse(row.custom_food_vibes_json || '[]'),
       cookingSkill: row.cooking_skill,
@@ -1023,6 +1194,20 @@ export class MealPlannerDatabase {
         ? Math.max(1, Math.min(7, Math.round(Number(patch.planDurationDays) || 7)))
         : current.planDurationDays || 7;
 
+    if (
+      patch.preferredCuisine !== undefined &&
+      patch.preferredCuisine !== null &&
+      !isValidCuisinePreference(patch.preferredCuisine)
+    ) {
+      throw new Error(
+        `Unsupported cuisine '${String(patch.preferredCuisine)}'. Supported: any, italian, french, polish, greek, azerbaijani, spanish`
+      );
+    }
+    const nextPreferredCuisine =
+      patch.preferredCuisine !== undefined
+        ? normalizeCuisinePreference(patch.preferredCuisine)
+        : normalizeCuisinePreference(current.preferredCuisine);
+
     const updated: UserPreferences = {
       ...current,
       ...patch,
@@ -1031,8 +1216,10 @@ export class MealPlannerDatabase {
       preferredSupermarket: nextSupermarket,
       weeklyBudgetPln: nextBudget,
       planDurationDays: nextPlanDuration,
+      preferredCuisine: nextPreferredCuisine,
       foodVibes: patch.foodVibes ?? current.foodVibes ?? [],
       customFoodVibes: patch.customFoodVibes ?? current.customFoodVibes ?? [],
+      likes: patch.likes ?? current.likes ?? [],
       notifications: patch.notifications
         ? { ...current.notifications, ...patch.notifications }
         : current.notifications,
@@ -1047,12 +1234,14 @@ export class MealPlannerDatabase {
           household_size = ?,
           weekly_budget_pln = ?,
           plan_duration_days = ?,
+          preferred_cuisine = ?,
           preferred_supermarket = ?,
           dietary_restrictions_json = ?,
           custom_restrictions_json = ?,
           allergies_json = ?,
           excluded_ingredients_json = ?,
           dislikes_json = ?,
+          likes_json = ?,
           food_vibes_json = ?,
           custom_food_vibes_json = ?,
           cooking_skill = ?,
@@ -1071,12 +1260,14 @@ export class MealPlannerDatabase {
         updated.householdSize,
         updated.weeklyBudgetPln,
         updated.planDurationDays || 7,
+        updated.preferredCuisine || 'any',
         updated.preferredSupermarket,
         JSON.stringify(updated.dietaryRestrictions),
         JSON.stringify(updated.customRestrictions),
         JSON.stringify(updated.allergies),
         JSON.stringify(updated.excludedIngredients),
         JSON.stringify(updated.dislikes),
+        JSON.stringify(updated.likes || []),
         JSON.stringify(updated.foodVibes || []),
         JSON.stringify(updated.customFoodVibes || []),
         updated.cookingSkill,
@@ -1164,6 +1355,7 @@ export class MealPlannerDatabase {
         descriptionAz: row.description_az || row.description_en,
         mealType: row.meal_type as MealType,
         category: row.category,
+        cuisine: row.cuisine ?? null,
         regionSuitability: row.region_suitability_json
           ? JSON.parse(row.region_suitability_json)
           : ['PL', 'AZ'],
@@ -1340,14 +1532,32 @@ export class MealPlannerDatabase {
     const planId = `wp-${userId}`;
     const now = new Date().toISOString();
 
+    const existingListForGen = this.db
+      .prepare('SELECT id, subtract_pantry FROM shopping_lists WHERE user_id = ?')
+      .get(userId) as any;
+
     const aiResult = await generateValidatedWeeklyMealPlan({
       weeklyPlanId: planId,
       weekStartDate: '2026-11-10',
       preferences,
       availableRecipes: allRecipes,
       pantryItems,
+      subtractPantry: Boolean(existingListForGen?.subtract_pantry),
       variationSeed,
     });
+
+    // Never save an over-cap (> budget + 50 PLN) plan; preserve the user's existing saved plan intact!
+    if (aiResult.isBudgetInfeasible) {
+      const err: any = new Error(aiResult.notesEn);
+      err.code = 'BUDGET_INFEASIBLE';
+      err.statusCode = 422;
+      err.minimumAchievableBasketPln = aiResult.minimumAchievableBasketPln;
+      err.maxAllowedBudgetPln = aiResult.maxAllowedBudgetPln;
+      err.notesPl = aiResult.notesPl;
+      err.notesEn = aiResult.notesEn;
+      err.notesAz = aiResult.notesAz;
+      throw err;
+    }
 
     const planDurationDays = Math.max(1, Math.min(7, Math.round(preferences.planDurationDays || 7)));
 
@@ -1357,8 +1567,8 @@ export class MealPlannerDatabase {
           id, user_id, region_code, currency_code, plan_duration_days, week_start_date,
           week_label_pl, week_label_en, week_label_az,
           target_budget_pln, supermarket_id, household_size,
-          ai_notes_pl, ai_notes_en, ai_notes_az, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, '2026-11-10', '10 lis – 16 lis', 'Nov 10 – Nov 16', '10 noy – 16 noy', ?, ?, ?, ?, ?, ?, ?, ?)`
+          ai_notes_pl, ai_notes_en, ai_notes_az, no_safe_slots_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, '2026-11-10', '10 lis – 16 lis', 'Nov 10 – Nov 16', '10 noy – 16 noy', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         planId,
@@ -1372,6 +1582,7 @@ export class MealPlannerDatabase {
         aiResult.notesPl,
         aiResult.notesEn,
         aiResult.notesAz,
+        JSON.stringify(aiResult.noSafeRecipeSlots || []),
         now,
         now
       );
@@ -1478,13 +1689,35 @@ export class MealPlannerDatabase {
 
     const shoppingList = this.getShoppingList(userId, meals);
     const totalEstimatedBasketPln = shoppingList.estimatedTotalPln;
+    const unpricedItemsCount = shoppingList.items.filter((i) => i.isPriced === false).length;
+    const hasIncompleteTotal = Boolean(shoppingList.hasIncompleteTotal || unpricedItemsCount > 0);
     const totalMealPortionsCostPln = Number(
       meals.reduce((acc, m) => acc + m.scaledCostPln, 0).toFixed(2)
     );
     const targetBudgetPln = planRow.target_budget_pln;
-    const remainingBudgetPln = Number((targetBudgetPln - totalEstimatedBasketPln).toFixed(2));
+    // Never treat missing prices as zero or claim true remaining when basket total is incomplete
+    const remainingBudgetPln = hasIncompleteTotal
+      ? 0
+      : Number((targetBudgetPln - totalEstimatedBasketPln).toFixed(2));
     const budgetUsagePercent =
       targetBudgetPln > 0 ? Math.round((totalEstimatedBasketPln / targetBudgetPln) * 100) : 0;
+
+    const resolvedStore = resolveValidSupermarketForRegion(
+      planRow.supermarket_id as SupermarketSlug,
+      regionCode
+    );
+
+    let noSafeRecipeSlots: Array<{ dayIndex: number; mealType: MealType; reason: string }> | undefined;
+    if (planRow.no_safe_slots_json) {
+      try {
+        const parsedSlots = JSON.parse(String(planRow.no_safe_slots_json));
+        if (Array.isArray(parsedSlots) && parsedSlots.length > 0) {
+          noSafeRecipeSlots = parsedSlots;
+        }
+      } catch {
+        // ignore malformed JSON
+      }
+    }
 
     return {
       id: planRow.id,
@@ -1497,16 +1730,21 @@ export class MealPlannerDatabase {
       weekLabelEn: planRow.week_label_en,
       weekLabelAz: planRow.week_label_az || '10 noy – 16 noy',
       targetBudgetPln,
-      supermarketId: planRow.supermarket_id as SupermarketSlug,
+      supermarketId: resolvedStore,
       householdSize: planRow.household_size,
       meals,
       totalEstimatedBasketPln,
       totalMealPortionsCostPln,
       remainingBudgetPln,
       budgetUsagePercent,
+      hasIncompleteTotal,
+      unpricedItemsCount,
+      isRemainingBudgetVerified: !hasIncompleteTotal,
       aiGenerationNotesPl: planRow.ai_notes_pl,
       aiGenerationNotesEn: planRow.ai_notes_en,
       aiGenerationNotesAz: planRow.ai_notes_az || planRow.ai_notes_en,
+      hasNoSafeRecipes: meals.length === 0,
+      ...(noSafeRecipeSlots ? { noSafeRecipeSlots } : {}),
       createdAt: planRow.created_at,
       updatedAt: planRow.updated_at,
     };
@@ -1535,8 +1773,11 @@ export class MealPlannerDatabase {
       throw new Error('Recipe not found');
     }
 
-    // Enforce deterministic allergy & dietary validation!
-    const validation = validateRecipeForUser(recipe, prefs, { enforcePrepTime: false });
+    // Enforce deterministic allergy & dietary validation (manual swap allows any cuisine)
+    const validation = validateRecipeForUser(recipe, prefs, {
+      enforcePrepTime: false,
+      enforceCuisine: false,
+    });
     if (!validation.valid) {
       throw new Error(`ALLERGY_OR_DIET_BLOCK: ${validation.violations.join(' | ')}`);
     }
@@ -1765,6 +2006,7 @@ export class MealPlannerDatabase {
     }));
 
     const pantryItems = this.getPantryItems(userId);
+    const hardExcludedTerms = collectHardExclusionTerms(prefs);
 
     return buildSmartShoppingList({
       shoppingListId: listRow.id,
@@ -1778,6 +2020,7 @@ export class MealPlannerDatabase {
       subtractPantry: Boolean(listRow.subtract_pantry),
       existingPurchasedMap: purchasedMap,
       manualItems,
+      hardExcludedTerms,
     });
   }
 
@@ -2346,6 +2589,24 @@ export class MealPlannerDatabase {
       .get() as { completed_at?: string } | undefined;
 
     applyMonitoredPricesToCatalogue(monitored, lastSyncRow?.completed_at || null);
+
+    // Sync active verified Glovo Warsaw Biedronka snapshot into PL catalogue (or clear if none active in this DB)
+    const activeSnap = this.db
+      .prepare(
+        "SELECT id, activated_at FROM biedronka_snapshots WHERE is_active = 1 AND status = 'ACTIVE' ORDER BY activated_at DESC LIMIT 1"
+      )
+      .get() as { id?: string; activated_at?: string } | undefined;
+
+    if (activeSnap?.id) {
+      const items = this.getActiveBiedronkaSnapshotItems();
+      applyVerifiedBiedronkaSnapshotToCatalogue(items, {
+        snapshotId: activeSnap.id,
+        activatedAt: activeSnap.activated_at || null,
+        referenceNowMs,
+      });
+    } else {
+      clearVerifiedBiedronkaSnapshot();
+    }
   }
 
   /**
@@ -2911,6 +3172,1116 @@ export class MealPlannerDatabase {
       outdatedProductsCount: outdatedCount,
       recentPriceChanges,
       recentSyncRuns,
+    };
+  }
+
+  // ============================================================================
+  // POLAND BIEDRONKA (GLOVO WARSAW) 5-DAY ATOMIC SNAPSHOT ENGINE
+  // ============================================================================
+
+  /**
+   * Persists a fetched Glovo Warsaw Biedronka snapshot and activates it ATOMICALLY
+   * ONLY if fetchResult.isComplete === true and items pass validation.
+   * On partial, rate-limited, or failed runs, records the attempt and keeps the last good snapshot active.
+   */
+  public persistAndMaybeActivateBiedronkaSnapshot(
+    fetchResult: GlovoFetchSnapshotResult,
+    options?: {
+      triggerType?: PriceSyncRunRecord['triggerType'];
+      durationMs?: number;
+      nowIso?: string;
+    }
+  ): {
+    activated: boolean;
+    activeSnapshotId: string | null;
+    syncRun: PriceSyncRunRecord;
+  } {
+    const nowIso = options?.nowIso || fetchResult.fetchedAt || new Date().toISOString();
+    const triggerType = options?.triggerType || 'SCHEDULED_5D';
+    const durationMs = Math.max(1, options?.durationMs ?? 1);
+    const snapshotId =
+      fetchResult.items[0]?.snapshotId ||
+      `snap-bd-waw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const syncRunId = `sync-biedronka-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    const matchedCount = fetchResult.items.filter(
+      (i) => i.canonicalIngredient && i.matchConfidence === 'HIGH'
+    ).length;
+    const errorSummary =
+      fetchResult.errors.length > 0 ? fetchResult.errors.slice(0, 6).join(' | ') : null;
+
+    let activated = false;
+
+    if (fetchResult.isComplete && fetchResult.items.length > 0) {
+      // Atomic activation inside a single SQLite transaction
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        this.db
+          .prepare(
+            `INSERT INTO biedronka_snapshots (
+              id, source_name, store_location, source_url, status, is_active,
+              total_sections, succeeded_sections, failed_sections,
+              products_count, matched_count, error_summary, fetched_at, activated_at
+            ) VALUES (?, ?, ?, ?, 'STAGING', 0, ?, ?, ?, ?, ?, ?, ?, NULL)`
+          )
+          .run(
+            snapshotId,
+            fetchResult.sourceName,
+            fetchResult.storeLocation,
+            fetchResult.sourceUrl,
+            fetchResult.totalSections,
+            fetchResult.succeededSections,
+            fetchResult.failedSections,
+            fetchResult.items.length,
+            matchedCount,
+            errorSummary,
+            fetchResult.fetchedAt
+          );
+
+        const insItem = this.db.prepare(`
+          INSERT INTO biedronka_snapshot_items (
+            id, snapshot_id, sku, name_pl, canonical_ingredient, match_confidence, category,
+            regular_price_pln, promo_price_pln, effective_price_pln,
+            package_size, package_unit, package_label_pl, unit_price_pln, unit_price_label,
+            sections_json, is_available, source_name, store_location, source_url,
+            verification_status, fetched_at,
+            product_id, external_product_id, store_product_id, store_id, store_address_id, glovo_product_url, observed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const item of fetchResult.items) {
+          insItem.run(
+            item.id,
+            snapshotId,
+            item.sku,
+            item.namePl,
+            item.canonicalIngredient,
+            item.matchConfidence,
+            item.category,
+            item.regularPricePln,
+            item.promoPricePln,
+            item.effectivePricePln,
+            item.packageSize,
+            item.packageUnit,
+            item.packageLabelPl,
+            item.unitPricePln,
+            item.unitPriceLabel,
+            JSON.stringify(item.sections || []),
+            item.isAvailable ? 1 : 0,
+            item.sourceName,
+            item.storeLocation,
+            item.sourceUrl,
+            item.verificationStatus,
+            item.fetchedAt,
+            item.productId ?? null,
+            item.externalProductId ?? null,
+            item.storeProductId ?? null,
+            item.storeId ?? null,
+            item.storeAddressId ?? null,
+            item.glovoProductUrl ?? null,
+            item.observedAt ?? null
+          );
+        }
+
+        // Flip active pointer atomically
+        this.db.prepare('UPDATE biedronka_snapshots SET is_active = 0 WHERE is_active = 1').run();
+        this.db
+          .prepare(
+            "UPDATE biedronka_snapshots SET is_active = 1, status = 'ACTIVE', activated_at = ? WHERE id = ?"
+          )
+          .run(nowIso, snapshotId);
+
+        this.db
+          .prepare(
+            "UPDATE supermarkets SET last_synced_at = ?, adapter_status = 'PUBLIC_CATALOGUE_CONNECTED' WHERE id = 'biedronka'"
+          )
+          .run(nowIso);
+
+        this.db.exec('COMMIT');
+        activated = true;
+      } catch (err) {
+        this.db.exec('ROLLBACK');
+        throw err;
+      }
+    } else {
+      // Record failed / partial / rate-limited attempt without touching the active snapshot
+      this.db
+        .prepare(
+          `INSERT INTO biedronka_snapshots (
+            id, source_name, store_location, source_url, status, is_active,
+            total_sections, succeeded_sections, failed_sections,
+            products_count, matched_count, error_summary, fetched_at, activated_at
+          ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, NULL)`
+        )
+        .run(
+          snapshotId,
+          fetchResult.sourceName,
+          fetchResult.storeLocation,
+          fetchResult.sourceUrl,
+          fetchResult.status,
+          fetchResult.totalSections,
+          fetchResult.succeededSections,
+          fetchResult.failedSections,
+          fetchResult.items.length,
+          matchedCount,
+          errorSummary,
+          fetchResult.fetchedAt
+        );
+    }
+
+    const runStatus: PriceSyncRunRecord['status'] = activated
+      ? 'SUCCESS'
+      : fetchResult.rateLimited
+      ? 'RATE_LIMITED'
+      : fetchResult.status === 'PARTIAL_REJECTED'
+      ? 'PARTIAL_REJECTED'
+      : 'FAILED';
+
+    this.db
+      .prepare(
+        `INSERT INTO price_sync_runs (
+          id, supermarket_id, source_url, trigger_type, status,
+          products_checked, products_updated, price_changes_recorded,
+          errors_count, error_summary, duration_ms, started_at, completed_at
+        ) VALUES (?, 'biedronka', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        syncRunId,
+        fetchResult.sourceUrl,
+        triggerType,
+        runStatus,
+        fetchResult.items.length,
+        activated ? fetchResult.items.length : 0,
+        fetchResult.errors.length,
+        errorSummary,
+        durationMs,
+        fetchResult.fetchedAt,
+        nowIso
+      );
+
+    // Refresh in-memory PL catalogue from the active snapshot (new if activated, last good if retained)
+    this.refreshInMemoryCatalogueFromMonitoredPrices(new Date(nowIso).getTime());
+
+    const activeRow = this.db
+      .prepare("SELECT id FROM biedronka_snapshots WHERE is_active = 1 AND status = 'ACTIVE' LIMIT 1")
+      .get() as { id?: string } | undefined;
+
+    return {
+      activated,
+      activeSnapshotId: activeRow?.id || null,
+      syncRun: {
+        id: syncRunId,
+        supermarketId: 'biedronka',
+        sourceUrl: fetchResult.sourceUrl,
+        triggerType,
+        status: runStatus,
+        productsChecked: fetchResult.items.length,
+        productsUpdated: activated ? fetchResult.items.length : 0,
+        priceChangesRecorded: 0,
+        errorsCount: fetchResult.errors.length,
+        errorSummary,
+        durationMs,
+        startedAt: fetchResult.fetchedAt,
+        completedAt: nowIso,
+      },
+    };
+  }
+
+  public async runBiedronkaGlovoRefresh(options?: {
+    triggerType?: PriceSyncRunRecord['triggerType'];
+    customFetch?: typeof fetch;
+    sleepFn?: (ms: number) => Promise<void>;
+    requestDelayMs?: number;
+    maxSections?: number;
+    maxRetriesPerSection?: number;
+    maxRetryAfterMs?: number;
+    minValidProducts?: number;
+    nowIso?: string;
+    prefetchedResult?: GlovoFetchSnapshotResult;
+  }): Promise<{
+    activated: boolean;
+    activeSnapshotId: string | null;
+    syncRun: PriceSyncRunRecord;
+    fetchResult: GlovoFetchSnapshotResult;
+  }> {
+    const startMs = Date.now();
+    const fetchResult =
+      options?.prefetchedResult ??
+      (await fetchGlovoBiedronkaWarsawSnapshot({
+        customFetch: options?.customFetch,
+        sleepFn: options?.sleepFn,
+        requestDelayMs: options?.requestDelayMs,
+        maxSections: options?.maxSections,
+        maxRetriesPerSection: options?.maxRetriesPerSection,
+        maxRetryAfterMs: options?.maxRetryAfterMs,
+        minValidProducts: options?.minValidProducts,
+        nowIso: options?.nowIso,
+      }));
+    const durationMs = Math.max(1, Date.now() - startMs);
+    const persisted = this.persistAndMaybeActivateBiedronkaSnapshot(fetchResult, {
+      triggerType: options?.triggerType || 'SCHEDULED_5D',
+      durationMs,
+      nowIso: options?.nowIso,
+    });
+    return {
+      ...persisted,
+      fetchResult,
+    };
+  }
+
+  public getActiveBiedronkaSnapshotItems(): VerifiedBiedronkaSnapshotItem[] {
+    const activeRow = this.db
+      .prepare("SELECT id FROM biedronka_snapshots WHERE is_active = 1 AND status = 'ACTIVE' LIMIT 1")
+      .get() as { id?: string } | undefined;
+    if (!activeRow?.id) return [];
+
+    const rows = this.db
+      .prepare('SELECT * FROM biedronka_snapshot_items WHERE snapshot_id = ? ORDER BY sku ASC')
+      .all(activeRow.id) as any[];
+
+    return rows.map((r) => {
+      let canonicalIngredient = r.canonical_ingredient;
+      let matchConfidence = r.match_confidence;
+      let category = r.category;
+      if (!canonicalIngredient && r.package_unit) {
+        const rematched = matchConservativePolishCanonical(r.name_pl, r.package_unit);
+        if (rematched) {
+          canonicalIngredient = rematched.canonicalIngredient;
+          matchConfidence = rematched.matchConfidence;
+          category = rematched.category;
+        }
+      }
+      return {
+        id: r.id,
+        snapshotId: r.snapshot_id,
+        sku: r.sku,
+        productId: r.product_id ?? null,
+        externalProductId: r.external_product_id ?? null,
+        storeProductId: r.store_product_id ?? null,
+        storeId: r.store_id ?? null,
+        storeAddressId: r.store_address_id ?? null,
+        glovoProductUrl:
+          r.glovo_product_url ??
+          buildGlovoProductUrl({
+            productId: r.product_id,
+            externalProductId: r.external_product_id,
+            storeProductId: r.store_product_id,
+          }),
+        namePl: r.name_pl,
+        canonicalIngredient,
+        matchConfidence,
+        category,
+        regularPricePln: Number(r.regular_price_pln),
+        promoPricePln: r.promo_price_pln !== null ? Number(r.promo_price_pln) : null,
+        effectivePricePln: Number(r.effective_price_pln),
+        packageSize: r.package_size !== null ? Number(r.package_size) : null,
+        packageUnit: r.package_unit,
+        packageLabelPl: r.package_label_pl,
+        unitPricePln: r.unit_price_pln !== null ? Number(r.unit_price_pln) : null,
+        unitPriceLabel: r.unit_price_label,
+        sections: JSON.parse(r.sections_json || '[]'),
+        isAvailable: Boolean(r.is_available),
+        sourceName: r.source_name,
+        storeLocation: r.store_location,
+        sourceUrl: r.source_url,
+        verificationStatus: r.verification_status,
+        fetchedAt: r.fetched_at,
+        // Preserve NULL for legacy records — never fabricate an observation timestamp
+        observedAt: r.observed_at ?? null,
+      };
+    });
+  }
+
+  /**
+   * Executes one bounded, resumable staging tick for Biedronka Warsaw (Glovo).
+   * - Respects the persisted 5-day interval between successful snapshots (unless force=true or resuming a STAGING run).
+   * - Respects persisted Retry-After / exponential backoff on a STAGING run before issuing new requests.
+   * - Fetches up to sectionsPerTick PENDING sections of the SAME staging run, persisting items without activating.
+   * - Atomically activates the snapshot ONLY when 100% of sections of that same run are completed with 0 failures.
+   */
+  public async runResumableBiedronkaRefreshTick(options?: {
+    triggerType?: PriceSyncRunRecord['triggerType'];
+    customFetch?: typeof fetch;
+    sleepFn?: (ms: number) => Promise<void>;
+    requestDelayMs?: number;
+    maxSections?: number;
+    sectionsPerTick?: number;
+    initialBackoffMs?: number;
+    maxBackoffMs?: number;
+    force?: boolean;
+    nowIso?: string;
+  }): Promise<{
+    activated: boolean;
+    deferred: boolean;
+    deferredUntil: string | null;
+    stagingSnapshotId: string | null;
+    activeSnapshotId: string | null;
+    completedSections: number;
+    totalSections: number;
+    status: 'ACTIVATED' | 'STAGING_IN_PROGRESS' | 'RATE_LIMITED_BACKOFF' | 'SKIPPED_FRESH_5D' | 'FAILED';
+    syncRun: PriceSyncRunRecord | null;
+  }> {
+    const startMs = Date.now();
+    const nowIso = options?.nowIso || new Date().toISOString();
+    const nowMs = new Date(nowIso).getTime();
+    const triggerType = options?.triggerType || 'SCHEDULED_5D';
+    const maxSections = options?.maxSections ?? DEFAULT_BIEDRONKA_MAX_SECTIONS;
+    const sectionsPerTick = options?.sectionsPerTick ?? DEFAULT_BIEDRONKA_SECTIONS_PER_TICK;
+    const initialBackoffMs = options?.initialBackoffMs ?? DEFAULT_BIEDRONKA_INITIAL_BACKOFF_MS;
+    const maxBackoffMs = options?.maxBackoffMs ?? DEFAULT_BIEDRONKA_MAX_BACKOFF_MS;
+
+    const getActiveId = (): string | null => {
+      const row = this.db
+        .prepare("SELECT id FROM biedronka_snapshots WHERE is_active = 1 AND status = 'ACTIVE' LIMIT 1")
+        .get() as { id?: string } | undefined;
+      return row?.id || null;
+    };
+
+    // 1. Check for an existing in-progress STAGING snapshot
+    let stagingRow = this.db
+      .prepare("SELECT * FROM biedronka_snapshots WHERE status = 'STAGING' ORDER BY fetched_at DESC LIMIT 1")
+      .get() as any;
+
+    if (stagingRow) {
+      // Honor persisted Retry-After / backoff before making any requests
+      if (stagingRow.next_retry_at) {
+        const retryMs = new Date(stagingRow.next_retry_at).getTime();
+        if (Number.isFinite(retryMs) && nowMs < retryMs) {
+          return {
+            activated: false,
+            deferred: true,
+            deferredUntil: stagingRow.next_retry_at,
+            stagingSnapshotId: stagingRow.id,
+            activeSnapshotId: getActiveId(),
+            completedSections: Number(stagingRow.succeeded_sections),
+            totalSections: Number(stagingRow.total_sections),
+            status: 'RATE_LIMITED_BACKOFF',
+            syncRun: null,
+          };
+        }
+      }
+    } else {
+      // 2. No staging run in progress -> enforce persisted 5-day interval between successful snapshots
+      const activeRow = this.db
+        .prepare("SELECT id, activated_at FROM biedronka_snapshots WHERE is_active = 1 AND status = 'ACTIVE' ORDER BY activated_at DESC LIMIT 1")
+        .get() as { id?: string; activated_at?: string } | undefined;
+
+      if (!options?.force && activeRow?.activated_at) {
+        const lastMs = new Date(activeRow.activated_at).getTime();
+        if (Number.isFinite(lastMs) && nowMs - lastMs < BIEDRONKA_REFRESH_INTERVAL_MS) {
+          return {
+            activated: false,
+            deferred: true,
+            deferredUntil: new Date(lastMs + BIEDRONKA_REFRESH_INTERVAL_MS).toISOString(),
+            stagingSnapshotId: null,
+            activeSnapshotId: activeRow.id || null,
+            completedSections: 0,
+            totalSections: 0,
+            status: 'SKIPPED_FRESH_5D',
+            syncRun: null,
+          };
+        }
+      }
+
+      // Discover all sections from the public Glovo Warsaw Biedronka homepage
+      const discovery = await discoverGlovoBiedronkaSections({
+        customFetch: options?.customFetch,
+        maxSections,
+      });
+
+      if (!discovery.ok) {
+        const syncRunId = `sync-biedronka-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const runStatus: PriceSyncRunRecord['status'] = discovery.rateLimited
+          ? 'RATE_LIMITED'
+          : discovery.truncatedByBound
+          ? 'PARTIAL_REJECTED'
+          : 'FAILED';
+        const durationMs = Math.max(1, Date.now() - startMs);
+        this.db
+          .prepare(
+            `INSERT INTO price_sync_runs (
+              id, supermarket_id, source_url, trigger_type, status,
+              products_checked, products_updated, price_changes_recorded,
+              errors_count, error_summary, duration_ms, started_at, completed_at
+            ) VALUES (?, 'biedronka', ?, ?, ?, 0, 0, 0, 1, ?, ?, ?, ?)`
+          )
+          .run(
+            syncRunId,
+            GLOVO_BIEDRONKA_STORE_URL,
+            triggerType,
+            runStatus,
+            discovery.error || 'Discovery failed',
+            durationMs,
+            nowIso,
+            nowIso
+          );
+        return {
+          activated: false,
+          deferred: false,
+          deferredUntil: null,
+          stagingSnapshotId: null,
+          activeSnapshotId: getActiveId(),
+          completedSections: 0,
+          totalSections: discovery.totalDiscovered,
+          status: discovery.rateLimited ? 'RATE_LIMITED_BACKOFF' : 'FAILED',
+          syncRun: {
+            id: syncRunId,
+            supermarketId: 'biedronka',
+            sourceUrl: GLOVO_BIEDRONKA_STORE_URL,
+            triggerType,
+            status: runStatus,
+            productsChecked: 0,
+            productsUpdated: 0,
+            priceChangesRecorded: 0,
+            errorsCount: 1,
+            errorSummary: discovery.error || 'Discovery failed',
+            durationMs,
+            startedAt: nowIso,
+            completedAt: nowIso,
+          },
+        };
+      }
+
+      const newSnapshotId = `snap-bd-waw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        this.db
+          .prepare(
+            `INSERT INTO biedronka_snapshots (
+              id, source_name, store_location, source_url, status, is_active,
+              total_sections, succeeded_sections, failed_sections,
+              products_count, matched_count, error_summary, next_retry_at, backoff_ms, fetched_at, activated_at
+            ) VALUES (?, ?, ?, ?, 'STAGING', 0, ?, 0, 0, 0, 0, NULL, NULL, 0, ?, NULL)`
+          )
+          .run(
+            newSnapshotId,
+            GLOVO_BIEDRONKA_SOURCE_NAME,
+            GLOVO_BIEDRONKA_STORE_LOCATION,
+            GLOVO_BIEDRONKA_STORE_URL,
+            discovery.sections.length,
+            nowIso
+          );
+
+        const insSec = this.db.prepare(`
+          INSERT INTO biedronka_staging_sections (
+            snapshot_id, section_index, path, section_name, section_id, status, price_cards, attempts, last_error, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'PENDING', 0, 0, NULL, ?)
+        `);
+        for (const sec of discovery.sections) {
+          insSec.run(newSnapshotId, sec.sectionIndex, sec.path, sec.section, sec.sectionId, nowIso);
+        }
+        this.db.exec('COMMIT');
+      } catch (err) {
+        this.db.exec('ROLLBACK');
+        throw err;
+      }
+
+      stagingRow = this.db
+        .prepare('SELECT * FROM biedronka_snapshots WHERE id = ?')
+        .get(newSnapshotId) as any;
+    }
+
+    const snapshotId: string = stagingRow.id;
+    const pendingRows = this.db
+      .prepare(
+        "SELECT section_index, path, section_name, section_id FROM biedronka_staging_sections WHERE snapshot_id = ? AND status = 'PENDING' ORDER BY section_index ASC LIMIT ?"
+      )
+      .all(snapshotId, sectionsPerTick) as Array<{
+      section_index: number;
+      path: string;
+      section_name: string;
+      section_id: string;
+    }>;
+
+    const batchResult = await fetchGlovoSectionsBatch(
+      pendingRows.map((r) => ({
+        sectionIndex: r.section_index,
+        path: r.path,
+        section: r.section_name,
+        sectionId: r.section_id,
+      })),
+      snapshotId,
+      {
+        customFetch: options?.customFetch,
+        sleepFn: options?.sleepFn,
+        requestDelayMs: options?.requestDelayMs,
+        nowIso,
+      }
+    );
+
+    // Persist batch results into staging tables (never modifying is_active yet)
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const upsertItem = this.db.prepare(`
+        INSERT OR REPLACE INTO biedronka_snapshot_items (
+          id, snapshot_id, sku, name_pl, canonical_ingredient, match_confidence, category,
+          regular_price_pln, promo_price_pln, effective_price_pln,
+          package_size, package_unit, package_label_pl, unit_price_pln, unit_price_label,
+          sections_json, is_available, source_name, store_location, source_url,
+          verification_status, fetched_at,
+          product_id, external_product_id, store_product_id, store_id, store_address_id, glovo_product_url, observed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const item of batchResult.items) {
+        upsertItem.run(
+          item.id,
+          snapshotId,
+          item.sku,
+          item.namePl,
+          item.canonicalIngredient,
+          item.matchConfidence,
+          item.category,
+          item.regularPricePln,
+          item.promoPricePln,
+          item.effectivePricePln,
+          item.packageSize,
+          item.packageUnit,
+          item.packageLabelPl,
+          item.unitPricePln,
+          item.unitPriceLabel,
+          JSON.stringify(item.sections || []),
+          item.isAvailable ? 1 : 0,
+          item.sourceName,
+          item.storeLocation,
+          item.sourceUrl,
+          item.verificationStatus,
+          item.fetchedAt,
+          item.productId ?? null,
+          item.externalProductId ?? null,
+          item.storeProductId ?? null,
+          item.storeId ?? null,
+          item.storeAddressId ?? null,
+          item.glovoProductUrl ?? null,
+          item.observedAt ?? null
+        );
+      }
+
+      const markDone = this.db.prepare(
+        "UPDATE biedronka_staging_sections SET status = 'DONE', attempts = attempts + 1, updated_at = ? WHERE snapshot_id = ? AND section_index = ?"
+      );
+      for (const idx of batchResult.completedSectionIndices) {
+        markDone.run(nowIso, snapshotId, idx);
+      }
+
+      const markFailed = this.db.prepare(
+        "UPDATE biedronka_staging_sections SET status = 'FAILED', attempts = attempts + 1, last_error = ?, updated_at = ? WHERE snapshot_id = ? AND section_index = ?"
+      );
+      for (const idx of batchResult.failedSectionIndices) {
+        markFailed.run(batchResult.errors[0] || 'Section fetch failed', nowIso, snapshotId, idx);
+      }
+
+      const counts = this.db
+        .prepare(
+          `SELECT
+            SUM(CASE WHEN status = 'DONE' THEN 1 ELSE 0 END) as done_cnt,
+            SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending_cnt,
+            SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed_cnt,
+            COUNT(*) as total_cnt
+           FROM biedronka_staging_sections WHERE snapshot_id = ?`
+        )
+        .get(snapshotId) as { done_cnt: number; pending_cnt: number; failed_cnt: number; total_cnt: number };
+
+      const itemCounts = this.db
+        .prepare(
+          `SELECT
+            COUNT(*) as total_items,
+            SUM(CASE WHEN canonical_ingredient IS NOT NULL AND match_confidence = 'HIGH' THEN 1 ELSE 0 END) as matched_items
+           FROM biedronka_snapshot_items WHERE snapshot_id = ?`
+        )
+        .get(snapshotId) as { total_items: number; matched_items: number };
+
+      let nextRetryAt: string | null = null;
+      let nextBackoffMs = 0;
+      if (batchResult.rateLimited) {
+        const prevBackoff = Number(stagingRow.backoff_ms || 0);
+        const expBackoff = prevBackoff > 0 ? Math.min(maxBackoffMs, prevBackoff * 2) : initialBackoffMs;
+        nextBackoffMs = Math.min(
+          maxBackoffMs,
+          Math.max(batchResult.retryAfterMs ?? 0, expBackoff)
+        );
+        nextRetryAt = new Date(nowMs + nextBackoffMs).toISOString();
+      }
+
+      const allSectionsCovered =
+        counts.total_cnt > 0 &&
+        counts.pending_cnt === 0 &&
+        counts.failed_cnt === 0 &&
+        counts.done_cnt === counts.total_cnt &&
+        itemCounts.total_items > 0;
+
+      if (allSectionsCovered) {
+        // Atomic publication ONLY after 100% of sections of this same run are covered!
+        this.db.prepare('UPDATE biedronka_snapshots SET is_active = 0 WHERE is_active = 1').run();
+        this.db
+          .prepare(
+            `UPDATE biedronka_snapshots SET
+              status = 'ACTIVE',
+              is_active = 1,
+              succeeded_sections = ?,
+              failed_sections = 0,
+              products_count = ?,
+              matched_count = ?,
+              next_retry_at = NULL,
+              backoff_ms = 0,
+              activated_at = ?
+             WHERE id = ?`
+          )
+          .run(counts.done_cnt, itemCounts.total_items, itemCounts.matched_items || 0, nowIso, snapshotId);
+        this.db
+          .prepare(
+            "UPDATE supermarkets SET last_synced_at = ?, adapter_status = 'PUBLIC_CATALOGUE_CONNECTED' WHERE id = 'biedronka'"
+          )
+          .run(nowIso);
+      } else {
+        const nextStatus = counts.failed_cnt > 0 && counts.pending_cnt === 0 ? 'PARTIAL_REJECTED' : 'STAGING';
+        this.db
+          .prepare(
+            `UPDATE biedronka_snapshots SET
+              status = ?,
+              succeeded_sections = ?,
+              failed_sections = ?,
+              products_count = ?,
+              matched_count = ?,
+              error_summary = ?,
+              next_retry_at = ?,
+              backoff_ms = ?
+             WHERE id = ?`
+          )
+          .run(
+            nextStatus,
+            counts.done_cnt,
+            counts.failed_cnt,
+            itemCounts.total_items,
+            itemCounts.matched_items || 0,
+            batchResult.errors.length > 0 ? batchResult.errors.slice(0, 5).join(' | ') : stagingRow.error_summary,
+            nextRetryAt,
+            nextBackoffMs,
+            snapshotId
+          );
+      }
+
+      this.db.exec('COMMIT');
+
+      const durationMs = Math.max(1, Date.now() - startMs);
+      const syncRunId = `sync-biedronka-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const runStatus: PriceSyncRunRecord['status'] = allSectionsCovered
+        ? 'SUCCESS'
+        : batchResult.rateLimited
+        ? 'RATE_LIMITED'
+        : 'PARTIAL_REJECTED';
+
+      this.db
+        .prepare(
+          `INSERT INTO price_sync_runs (
+            id, supermarket_id, source_url, trigger_type, status,
+            products_checked, products_updated, price_changes_recorded,
+            errors_count, error_summary, duration_ms, started_at, completed_at
+          ) VALUES (?, 'biedronka', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          syncRunId,
+          GLOVO_BIEDRONKA_STORE_URL,
+          triggerType,
+          runStatus,
+          itemCounts.total_items,
+          allSectionsCovered ? itemCounts.total_items : 0,
+          batchResult.errors.length,
+          batchResult.errors.length > 0 ? batchResult.errors.slice(0, 5).join(' | ') : null,
+          durationMs,
+          nowIso,
+          nowIso
+        );
+
+      this.refreshInMemoryCatalogueFromMonitoredPrices(nowMs);
+
+      return {
+        activated: allSectionsCovered,
+        deferred: batchResult.rateLimited,
+        deferredUntil: nextRetryAt,
+        stagingSnapshotId: allSectionsCovered ? null : snapshotId,
+        activeSnapshotId: getActiveId(),
+        completedSections: counts.done_cnt,
+        totalSections: counts.total_cnt,
+        status: allSectionsCovered
+          ? 'ACTIVATED'
+          : batchResult.rateLimited
+          ? 'RATE_LIMITED_BACKOFF'
+          : 'STAGING_IN_PROGRESS',
+        syncRun: {
+          id: syncRunId,
+          supermarketId: 'biedronka',
+          sourceUrl: GLOVO_BIEDRONKA_STORE_URL,
+          triggerType,
+          status: runStatus,
+          productsChecked: itemCounts.total_items,
+          productsUpdated: allSectionsCovered ? itemCounts.total_items : 0,
+          priceChangesRecorded: 0,
+          errorsCount: batchResult.errors.length,
+          errorSummary: batchResult.errors.length > 0 ? batchResult.errors.slice(0, 5).join(' | ') : null,
+          durationMs,
+          startedAt: nowIso,
+          completedAt: nowIso,
+        },
+      };
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  public getBiedronkaSnapshotSummary(referenceNowMs: number = Date.now()): BiedronkaSnapshotSummary {
+    const activeRow = this.db
+      .prepare(
+        "SELECT * FROM biedronka_snapshots WHERE is_active = 1 AND status = 'ACTIVE' ORDER BY activated_at DESC LIMIT 1"
+      )
+      .get() as any;
+
+    const stagingRow = this.db
+      .prepare(
+        "SELECT * FROM biedronka_snapshots WHERE status = 'STAGING' ORDER BY fetched_at DESC LIMIT 1"
+      )
+      .get() as any;
+
+    const runsRows = this.db
+      .prepare(
+        "SELECT * FROM price_sync_runs WHERE supermarket_id = 'biedronka' ORDER BY completed_at DESC, rowid DESC LIMIT 10"
+      )
+      .all() as any[];
+
+    const recentRuns: PriceSyncRunRecord[] = runsRows.map((r) => ({
+      id: r.id,
+      supermarketId: r.supermarket_id as SupermarketSlug,
+      sourceUrl: r.source_url,
+      triggerType: r.trigger_type,
+      status: r.status,
+      productsChecked: Number(r.products_checked),
+      productsUpdated: Number(r.products_updated),
+      priceChangesRecorded: Number(r.price_changes_recorded),
+      errorsCount: Number(r.errors_count),
+      errorSummary: r.error_summary,
+      durationMs: Number(r.duration_ms),
+      startedAt: r.started_at,
+      completedAt: r.completed_at,
+    }));
+
+    const lastActivatedAt: string | null = activeRow?.activated_at || null;
+    const lastAttempt = recentRuns[0] || null;
+    const lastActivatedMs = lastActivatedAt ? new Date(lastActivatedAt).getTime() : 0;
+    const isStale =
+      !lastActivatedMs ||
+      (referenceNowMs - lastActivatedMs) / (1000 * 3600) > BIEDRONKA_STALE_THRESHOLD_HOURS;
+    const nextScheduledRefreshAt = lastActivatedMs
+      ? new Date(lastActivatedMs + BIEDRONKA_REFRESH_INTERVAL_MS).toISOString()
+      : null;
+
+    return {
+      activeSnapshotId: activeRow?.id || null,
+      sourceName: activeRow?.source_name || GLOVO_BIEDRONKA_SOURCE_NAME,
+      storeLocation: activeRow?.store_location || GLOVO_BIEDRONKA_STORE_LOCATION,
+      sourceUrl: activeRow?.source_url || GLOVO_BIEDRONKA_STORE_URL,
+      refreshCadenceDays: BIEDRONKA_REFRESH_CADENCE_DAYS,
+      lastActivatedAt,
+      lastAttemptedAt: lastAttempt?.completedAt || null,
+      lastRunStatus: (lastAttempt?.status as any) || 'NEVER_RUN',
+      nextScheduledRefreshAt,
+      isStale,
+      activeItemsCount: activeRow ? Number(activeRow.products_count) : 0,
+      matchedItemsCount: activeRow ? Number(activeRow.matched_count) : 0,
+      totalSections: activeRow ? Number(activeRow.total_sections) : 0,
+      succeededSections: activeRow ? Number(activeRow.succeeded_sections) : 0,
+      stagingSnapshotId: stagingRow?.id || null,
+      stagingCompletedSections: stagingRow ? Number(stagingRow.succeeded_sections) : 0,
+      stagingTotalSections: stagingRow ? Number(stagingRow.total_sections) : 0,
+      stagingNextRetryAt: stagingRow?.next_retry_at || null,
+      recentRuns,
+    };
+  }
+
+  /**
+   * Returns cached or on-demand fetched Glovo Warsaw Biedronka product details for an active snapshot SKU.
+   * - Validates exact SKU membership in the active Warsaw Biedronka snapshot.
+   * - Preserves lossless 64-bit / 29-digit IDs and per-item observation timestamp (null if unknown).
+   * - Respects persisted 429/Retry-After backoff without hammering Glovo.
+   * - Never fabricates missing description, ingredients, nutrition, or country of origin.
+   */
+  public async getOrFetchBiedronkaProductDetail(
+    sku: string,
+    options?: {
+      customFetch?: typeof fetch;
+      nowIso?: string;
+      forceRefresh?: boolean;
+      allowLiveFetch?: boolean;
+    }
+  ): Promise<BiedronkaProductDetail | null> {
+    const cleanSku = String(sku || '').trim();
+    if (!cleanSku) return null;
+
+    const activeRow = this.db
+      .prepare("SELECT id FROM biedronka_snapshots WHERE is_active = 1 AND status = 'ACTIVE' ORDER BY activated_at DESC LIMIT 1")
+      .get() as { id?: string } | undefined;
+    if (!activeRow?.id) return null;
+
+    const itemRow = this.db
+      .prepare('SELECT * FROM biedronka_snapshot_items WHERE snapshot_id = ? AND sku = ? LIMIT 1')
+      .get(activeRow.id, cleanSku) as any;
+    if (!itemRow) return null;
+
+    const nowIso = options?.nowIso || new Date().toISOString();
+    const nowMs = new Date(nowIso).getTime();
+
+    const productId: string | null = itemRow.product_id ?? null;
+    const externalProductId: string | null = itemRow.external_product_id ?? null;
+    const storeProductId: string | null = itemRow.store_product_id ?? null;
+    const storeId: string | null = itemRow.store_id ?? null;
+    const storeAddressId: string | null = itemRow.store_address_id ?? null;
+    const glovoProductUrl: string | null =
+      itemRow.glovo_product_url ??
+      buildGlovoProductUrl({ productId, externalProductId, storeProductId });
+
+    const baseDetail: BiedronkaProductDetail = {
+      sku: itemRow.sku,
+      productId,
+      externalProductId,
+      storeProductId,
+      storeId,
+      storeAddressId,
+      storeSlug: 'biedronka-waw',
+      sourceName: itemRow.source_name || GLOVO_BIEDRONKA_SOURCE_NAME,
+      storeLocation: itemRow.store_location || GLOVO_BIEDRONKA_STORE_LOCATION,
+      namePl: itemRow.name_pl,
+      packageLabelPl: itemRow.package_label_pl ?? null,
+      regularPricePln: Number(itemRow.regular_price_pln),
+      promoPricePln: itemRow.promo_price_pln !== null ? Number(itemRow.promo_price_pln) : null,
+      effectivePricePln: resolvePolicyEffectivePrice(
+        Number(itemRow.regular_price_pln),
+        itemRow.promo_price_pln !== null ? Number(itemRow.promo_price_pln) : null,
+        'PL',
+        'biedronka'
+      ),
+      priceObservedAt: itemRow.observed_at ?? null,
+      imageUrl: null,
+      glovoProductUrl,
+      description: null,
+      ingredients: null,
+      nutritionBasis: null,
+      nutritionRows: [],
+      countryOfOrigin: null,
+      detailStatus: 'MISSING_IDENTITY',
+      detailError: null,
+      retryAfterAt: null,
+      detailFetchedAt: null,
+      fromCache: false,
+    };
+
+    const cached = this.db
+      .prepare('SELECT * FROM biedronka_product_details WHERE sku = ?')
+      .get(cleanSku) as any;
+
+    const cachedMatchesIdentity = Boolean(
+      cached &&
+        validateBiedronkaProductIdentity(
+          {
+            productId,
+            externalProductId,
+            storeProductId,
+            storeId,
+            storeAddressId,
+          },
+          {
+            productId: cached.product_id ?? null,
+            externalProductId: cached.external_product_id ?? null,
+            storeProductId: cached.store_product_id ?? null,
+            storeId: cached.store_id ?? null,
+            storeAddressId: cached.store_address_id ?? null,
+          }
+        ).valid
+    );
+
+    const hydrateCached = (row: any): Partial<BiedronkaProductDetail> => {
+      let rows: BiedronkaNutritionRow[] = [];
+      try {
+        const parsed = JSON.parse(row.nutrition_rows_json || '[]');
+        if (Array.isArray(parsed)) rows = parsed;
+      } catch {
+        rows = [];
+      }
+      return {
+        description: row.description ?? null,
+        ingredients: row.ingredients ?? null,
+        nutritionBasis: row.nutrition_basis ?? null,
+        nutritionRows: rows,
+        countryOfOrigin: row.country_of_origin ?? null,
+        imageUrl: row.image_url ?? null,
+        glovoProductUrl: row.glovo_product_url ?? glovoProductUrl,
+        detailFetchedAt: row.fetched_at ?? null,
+      };
+    };
+
+    // 1. Return fresh cached detail if within 5-day TTL and not forced
+    if (!options?.forceRefresh && cachedMatchesIdentity && cached.fetched_at) {
+      const fetchedMs = new Date(cached.fetched_at).getTime();
+      if (Number.isFinite(fetchedMs) && nowMs - fetchedMs < BIEDRONKA_REFRESH_INTERVAL_MS) {
+        return {
+          ...baseDetail,
+          ...hydrateCached(cached),
+          detailStatus: 'CACHED',
+          detailError: null,
+          retryAfterAt: null,
+          fromCache: true,
+        };
+      }
+    }
+
+    // 2. Honor persisted 429/Retry-After backoff (0 upstream requests while deferred)
+    if (cached?.next_retry_at) {
+      const retryMs = new Date(cached.next_retry_at).getTime();
+      if (Number.isFinite(retryMs) && nowMs < retryMs) {
+        return {
+          ...baseDetail,
+          ...(cachedMatchesIdentity ? hydrateCached(cached) : {}),
+          detailStatus: 'RATE_LIMITED',
+          detailError: cached.last_error || 'Upstream Glovo rate limit active; retry later.',
+          retryAfterAt: cached.next_retry_at,
+          fromCache: Boolean(cachedMatchesIdentity && cached.fetched_at),
+        };
+      }
+    }
+
+    // 3. Validate exact Glovo store + product identity before making any upstream request
+    if (!storeId || !storeAddressId || !productId) {
+      return {
+        ...baseDetail,
+        ...(cachedMatchesIdentity ? hydrateCached(cached) : {}),
+        detailStatus: 'MISSING_IDENTITY',
+        detailError:
+          'Exact Glovo Warsaw store/product identifiers are missing for this snapshot item.',
+        fromCache: Boolean(cachedMatchesIdentity && cached.fetched_at),
+      };
+    }
+
+    // 4. If live fetch is disabled (e.g. offline/cache-only mode), return cached or offline status
+    if (options?.allowLiveFetch === false) {
+      return {
+        ...baseDetail,
+        ...(cachedMatchesIdentity ? hydrateCached(cached) : {}),
+        detailStatus: cachedMatchesIdentity && cached.fetched_at ? 'CACHED' : 'OFFLINE_UNAVAILABLE',
+        detailError:
+          cachedMatchesIdentity && cached.fetched_at
+            ? null
+            : 'Product details not cached locally.',
+        fromCache: Boolean(cachedMatchesIdentity && cached.fetched_at),
+      };
+    }
+
+    // 5. Perform single on-demand paced fetch to Glovo Warsaw product view endpoint
+    const upstream = await fetchGlovoBiedronkaProductDetail({
+      storeId,
+      storeAddressId,
+      productId,
+      externalProductId,
+      storeProductId,
+      customFetch: options?.customFetch,
+    });
+
+    if (upstream.rateLimited) {
+      const backoffMs = Math.min(
+        DEFAULT_BIEDRONKA_MAX_BACKOFF_MS,
+        Math.max(upstream.retryAfterMs ?? 0, DEFAULT_BIEDRONKA_INITIAL_BACKOFF_MS)
+      );
+      const retryAfterAt = new Date(nowMs + backoffMs).toISOString();
+
+      this.db
+        .prepare(
+          `INSERT INTO biedronka_product_details (
+            sku, product_id, external_product_id, store_product_id, store_id, store_address_id,
+            glovo_product_url, next_retry_at, last_error
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(sku) DO UPDATE SET
+            next_retry_at = excluded.next_retry_at,
+            last_error = excluded.last_error`
+        )
+        .run(
+          cleanSku,
+          productId,
+          externalProductId,
+          storeProductId,
+          storeId,
+          storeAddressId,
+          glovoProductUrl,
+          retryAfterAt,
+          upstream.error
+        );
+
+      return {
+        ...baseDetail,
+        ...(cachedMatchesIdentity ? hydrateCached(cached) : {}),
+        detailStatus: 'RATE_LIMITED',
+        detailError: upstream.error,
+        retryAfterAt,
+        fromCache: Boolean(cachedMatchesIdentity && cached.fetched_at),
+      };
+    }
+
+    if (!upstream.ok || !upstream.detail) {
+      return {
+        ...baseDetail,
+        ...(cachedMatchesIdentity ? hydrateCached(cached) : {}),
+        detailStatus: 'UPSTREAM_ERROR',
+        detailError: upstream.error || 'Failed to load Glovo product details.',
+        fromCache: Boolean(cachedMatchesIdentity && cached.fetched_at),
+      };
+    }
+
+    const d = upstream.detail;
+    const resolvedGlovoUrl =
+      buildGlovoProductUrl({
+        productId: d.productId || productId,
+        externalProductId: d.externalProductId || externalProductId,
+        storeProductId: d.storeProductId || storeProductId,
+      }) || glovoProductUrl;
+
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO biedronka_product_details (
+          sku, product_id, external_product_id, store_product_id, store_id, store_address_id,
+          description, ingredients, nutrition_basis, nutrition_rows_json, country_of_origin,
+          image_url, glovo_product_url, fetched_at, next_retry_at, last_error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`
+      )
+      .run(
+        cleanSku,
+        d.productId || productId,
+        d.externalProductId || externalProductId,
+        d.storeProductId || storeProductId,
+        storeId,
+        storeAddressId,
+        d.description,
+        d.ingredients,
+        d.nutritionBasis,
+        JSON.stringify(d.nutritionRows || []),
+        d.countryOfOrigin,
+        d.imageUrl,
+        resolvedGlovoUrl,
+        nowIso
+      );
+
+    return {
+      ...baseDetail,
+      productId: d.productId || productId,
+      externalProductId: d.externalProductId || externalProductId,
+      storeProductId: d.storeProductId || storeProductId,
+      imageUrl: d.imageUrl,
+      glovoProductUrl: resolvedGlovoUrl,
+      description: d.description,
+      ingredients: d.ingredients,
+      nutritionBasis: d.nutritionBasis,
+      nutritionRows: d.nutritionRows,
+      countryOfOrigin: d.countryOfOrigin,
+      detailStatus: 'OK',
+      detailError: null,
+      retryAfterAt: null,
+      detailFetchedAt: nowIso,
+      fromCache: false,
     };
   }
 }

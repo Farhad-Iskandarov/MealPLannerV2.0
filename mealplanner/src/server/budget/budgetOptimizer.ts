@@ -26,10 +26,15 @@ export function analyzeAndOptimizeBudget(params: {
 
   const weeklyBudgetPln = preferences.weeklyBudgetPln;
   const estimatedBasketPln = shoppingList.estimatedTotalPln;
+  const unpricedItemsCount = shoppingList.items.filter((i) => i.isPriced === false).length;
+  const hasIncompleteTotal = Boolean(shoppingList.hasIncompleteTotal || unpricedItemsCount > 0);
   const mealPortionsCostPln = Number(
     plannedMeals.reduce((acc, m) => acc + m.scaledCostPln, 0).toFixed(2)
   );
-  const differencePln = Number((weeklyBudgetPln - estimatedBasketPln).toFixed(2));
+  // Never treat missing prices as zero or claim a verified remaining amount when items are unpriced!
+  const differencePln = hasIncompleteTotal
+    ? 0
+    : Number((weeklyBudgetPln - estimatedBasketPln).toFixed(2));
   const isOverBudget = estimatedBasketPln > weeklyBudgetPln;
   const usagePercent =
     weeklyBudgetPln > 0 ? Math.round((estimatedBasketPln / weeklyBudgetPln) * 100) : 0;
@@ -79,20 +84,53 @@ export function analyzeAndOptimizeBudget(params: {
   }
 
   // 3. Find expensive planned meals and suggest validated cheaper alternatives of the same mealType
+  // while preserving daily distinctness, non-consecutive slot variety, and cuisine/diet/exclusion rules
   const validAlternatives = allRecipes.filter(
-    (r) => validateRecipeForUser(r, preferences, { enforcePrepTime: false }).valid
+    (r) => validateRecipeForUser(r, preferences, { enforcePrepTime: false, enforceCuisine: true }).valid
   );
+
+  const usedOnDay = new Map<number, Set<string>>();
+  const slotRecipeByDay = new Map<string, string>();
+  const weeklyUsage = new Map<string, number>();
+  for (const m of plannedMeals) {
+    const daySet = usedOnDay.get(m.dayIndex) || new Set<string>();
+    daySet.add(m.recipe.id);
+    usedOnDay.set(m.dayIndex, daySet);
+    slotRecipeByDay.set(`${m.dayIndex}:${m.mealType}`, m.recipe.id);
+    weeklyUsage.set(m.recipe.id, (weeklyUsage.get(m.recipe.id) ?? 0) + 1);
+  }
+  const suggestedReplacementIds = new Set<string>();
 
   const minMealSavingsThreshold = currencyCode === 'AZN' ? 0.9 : 2.0;
   const sortedMeals = [...plannedMeals].sort((a, b) => b.scaledCostPln - a.scaledCostPln);
   for (const expensiveMeal of sortedMeals.slice(0, 3)) {
-    const cheaperCandidates = validAlternatives
-      .filter((r) => r.mealType === expensiveMeal.mealType && r.id !== expensiveMeal.recipe.id)
-      .sort(
-        (a, b) =>
-          getRecipeBaseCostForCurrency(a, currencyCode) -
-          getRecipeBaseCostForCurrency(b, currencyCode)
-      );
+    const daySet = usedOnDay.get(expensiveMeal.dayIndex) || new Set<string>();
+    const prevSlotId = slotRecipeByDay.get(`${expensiveMeal.dayIndex - 1}:${expensiveMeal.mealType}`);
+    const nextSlotId = slotRecipeByDay.get(`${expensiveMeal.dayIndex + 1}:${expensiveMeal.mealType}`);
+
+    // Strictly same mealType, never duplicate another dish already on the same day, avoid consecutive repeats
+    let cheaperCandidates = validAlternatives.filter(
+      (r) =>
+        r.mealType === expensiveMeal.mealType &&
+        r.id !== expensiveMeal.recipe.id &&
+        !daySet.has(r.id) &&
+        r.id !== prevSlotId &&
+        r.id !== nextSlotId
+    );
+
+    // Prefer replacements not already suggested for another slot when available
+    const freshReplacements = cheaperCandidates.filter((r) => !suggestedReplacementIds.has(r.id));
+    if (freshReplacements.length > 0) {
+      cheaperCandidates = freshReplacements;
+    }
+
+    cheaperCandidates.sort((a, b) => {
+      const useDiff = (weeklyUsage.get(a.id) ?? 0) - (weeklyUsage.get(b.id) ?? 0);
+      const costDiff =
+        getRecipeBaseCostForCurrency(a, currencyCode) -
+        getRecipeBaseCostForCurrency(b, currencyCode);
+      return useDiff !== 0 ? useDiff : costDiff || a.id.localeCompare(b.id);
+    });
 
     const bestAlt = cheaperCandidates[0];
     if (bestAlt) {
@@ -102,6 +140,7 @@ export function analyzeAndOptimizeBudget(params: {
       );
       const mealSavings = Number((expensiveMeal.scaledCostPln - altScaledCost).toFixed(2));
       if (mealSavings >= minMealSavingsThreshold) {
+        suggestedReplacementIds.add(bestAlt.id);
         const mealSavingsLabel = formatMoney(mealSavings, currencyCode);
         suggestions.push({
           id: `sug-swap-${expensiveMeal.id}`,
@@ -145,6 +184,9 @@ export function analyzeAndOptimizeBudget(params: {
     differencePln,
     isOverBudget,
     usagePercent,
+    hasIncompleteTotal,
+    unpricedItemsCount,
+    isRemainingBudgetVerified: !hasIncompleteTotal,
     expensiveItems,
     suggestions,
     disclaimerPl:

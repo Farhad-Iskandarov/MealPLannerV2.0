@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -48,6 +48,9 @@ mkdirSync(assetsWww, { recursive: true });
 copyFileSync(join(rootDir, 'dist/public/index.html'), join(assetsWww, 'index.html'));
 copyFileSync(join(rootDir, 'dist/public/bundle.js'), join(assetsWww, 'bundle.js'));
 copyFileSync(join(rootDir, 'dist/public/bundle.css'), join(assetsWww, 'bundle.css'));
+if (existsSync(join(rootDir, 'dist/public/assets'))) {
+  cpSync(join(rootDir, 'dist/public/assets'), join(assetsWww, 'assets'), { recursive: true });
+}
 
 const buildWork = join(rootDir, 'android/app/build/inter');
 rmSync(join(buildWork, 'compiled_res'), { recursive: true, force: true });
@@ -61,6 +64,9 @@ mkdirSync(join(buildWork, 'apk_stage/assets/www'), { recursive: true });
 copyFileSync(join(rootDir, 'dist/public/index.html'), join(buildWork, 'apk_stage/assets/www/index.html'));
 copyFileSync(join(rootDir, 'dist/public/bundle.js'), join(buildWork, 'apk_stage/assets/www/bundle.js'));
 copyFileSync(join(rootDir, 'dist/public/bundle.css'), join(buildWork, 'apk_stage/assets/www/bundle.css'));
+if (existsSync(join(rootDir, 'dist/public/assets'))) {
+  cpSync(join(rootDir, 'dist/public/assets'), join(buildWork, 'apk_stage/assets/www/assets'), { recursive: true });
+}
 
 const apkOutDir = join(rootDir, 'android/app/build/outputs/apk/debug');
 mkdirSync(apkOutDir, { recursive: true });
@@ -139,31 +145,35 @@ if (hasJdk) {
     ['-uf', unalignedApk, '-C', join(buildWork, 'dex'), 'classes.dex'],
     { env, stdio: 'inherit' }
   );
-  execFileSync(
-    jarExe,
-    [
-      '-uf',
-      unalignedApk,
-      '-C',
-      join(buildWork, 'apk_stage'),
-      'assets/www/index.html',
-      '-C',
-      join(buildWork, 'apk_stage'),
-      'assets/www/bundle.js',
-      '-C',
-      join(buildWork, 'apk_stage'),
-      'assets/www/bundle.css',
-    ],
-    { env, stdio: 'inherit' }
-  );
+  const jarArgs = [
+    '-uf',
+    unalignedApk,
+    '-C',
+    join(buildWork, 'apk_stage'),
+    'assets/www/index.html',
+    '-C',
+    join(buildWork, 'apk_stage'),
+    'assets/www/bundle.js',
+    '-C',
+    join(buildWork, 'apk_stage'),
+    'assets/www/bundle.css',
+  ];
+  if (existsSync(join(buildWork, 'apk_stage/assets/www/assets'))) {
+    jarArgs.push('-C', join(buildWork, 'apk_stage'), 'assets/www/assets');
+  }
+  execFileSync(jarExe, jarArgs, { env, stdio: 'inherit' });
 } else {
   const pyScript = `
-import sys, zipfile
+import os, sys, zipfile
 apk_path, dex_path, stage_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+www_dir = os.path.join(stage_dir, 'assets', 'www')
 with zipfile.ZipFile(apk_path, 'a', compression=zipfile.ZIP_DEFLATED) as zf:
     zf.write(dex_path, 'classes.dex')
-    for name in ['index.html', 'bundle.js', 'bundle.css']:
-        zf.write(f'{stage_dir}/assets/www/{name}', f'assets/www/{name}')
+    for root, _, files in os.walk(www_dir):
+        for fname in files:
+            full = os.path.join(root, fname)
+            rel = os.path.relpath(full, stage_dir).replace('\\\\', '/')
+            zf.write(full, rel)
 `;
   execFileSync('python', ['-c', pyScript, unalignedApk, dexFile, join(buildWork, 'apk_stage')], {
     env,

@@ -23,12 +23,18 @@ import {
   RegionCode,
   CurrencyCode,
   SupermarketSlug,
+  CuisinePreference,
   DietaryOption,
   FoodVibeOption,
   KitchenEquipmentOption,
   UserPreferences,
   Recipe,
 } from '../../shared/types';
+import {
+  CUISINE_OPTIONS,
+  getCuisineLabel,
+  normalizeCuisinePreference,
+} from '../../shared/cuisineConfig';
 import { AppStatePayload } from '../api/clientApi';
 import { formatPln, translations } from '../../shared/i18n';
 import {
@@ -214,14 +220,12 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [generatedState, setGeneratedState] = useState<AppStatePayload | null>(null);
 
-  // Step 1 state: Region & Supermarket
-  const initialRegion: RegionCode = state.user.regionCode || prefs.regionCode || 'PL';
-  const [wizRegion, setWizRegion] = useState<RegionCode>(initialRegion);
-  const [wizCurrency, setWizCurrency] = useState<CurrencyCode>(
-    state.user.currencyCode || prefs.currencyCode || getDefaultCurrencyForRegion(initialRegion)
-  );
+  // Step 1 state: Read-only Settings Region & Currency + Filtered Supermarket
+  const wizRegion: RegionCode = state.user.regionCode || prefs.regionCode || 'PL';
+  const wizCurrency: CurrencyCode =
+    state.user.currencyCode || prefs.currencyCode || getDefaultCurrencyForRegion(wizRegion);
   const [wizStore, setWizStore] = useState<SupermarketSlug>(
-    resolveValidSupermarketForRegion(prefs.preferredSupermarket, initialRegion)
+    resolveValidSupermarketForRegion(prefs.preferredSupermarket, wizRegion)
   );
 
   // Step 2 state: Dietary Preferences & Excluded Ingredients
@@ -239,12 +243,15 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
   );
 
   // Step 4 state: Budget & Duration (1-7 days)
-  const [wizBudget, setWizBudget] = useState<string>(String(prefs.weeklyBudgetPln || (initialRegion === 'AZ' ? 120 : 250)));
+  const [wizBudget, setWizBudget] = useState<string>(String(prefs.weeklyBudgetPln || (wizRegion === 'AZ' ? 120 : 250)));
   const [wizDurationDays, setWizDurationDays] = useState<number>(
     Math.max(1, Math.min(7, prefs.planDurationDays || 7))
   );
 
-  // Step 5 state: Food Vibe
+  // Step 5 state: Single Cuisine choice + Food Vibe
+  const [wizCuisine, setWizCuisine] = useState<CuisinePreference>(() =>
+    normalizeCuisinePreference(prefs.preferredCuisine)
+  );
   const [wizVibes, setWizVibes] = useState<FoodVibeOption[]>(
     prefs.foodVibes && prefs.foodVibes.length > 0
       ? prefs.foodVibes
@@ -323,13 +330,14 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
     );
   }, [wizRegion, state.recipes, ingSearch]);
 
-  // Compatible recipe count preview for Step 2 & Step 6
+  // Compatible recipe count preview for Step 2, Step 5 & Step 6
   const compatibleRecipesCount = useMemo(() => {
     const candidatePrefs: UserPreferences = {
       ...prefs,
       regionCode: wizRegion,
       currencyCode: wizCurrency,
       preferredSupermarket: wizStore,
+      preferredCuisine: wizCuisine,
       dietaryRestrictions: wizDiets,
       allergies: wizAllergies,
       excludedIngredients: wizExcluded,
@@ -340,18 +348,10 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
         validateRecipeForUser(r, candidatePrefs, {
           enforcePrepTime: false,
           enforceEquipment: true,
+          enforceCuisine: true,
         }).valid
     ).length;
-  }, [prefs, wizRegion, wizCurrency, wizStore, wizDiets, wizAllergies, wizExcluded, wizEquipment, wizCustomEquip, state.recipes]);
-
-  const handleSwitchWizardRegion = (newRegion: RegionCode) => {
-    if (newRegion === wizRegion) return;
-    setWizRegion(newRegion);
-    const nextCurr = getDefaultCurrencyForRegion(newRegion);
-    setWizCurrency(nextCurr);
-    setWizStore(REGIONS[newRegion].defaultSupermarket);
-    setWizBudget(newRegion === 'AZ' ? '120' : '250');
-  };
+  }, [prefs, wizRegion, wizCurrency, wizStore, wizCuisine, wizDiets, wizAllergies, wizExcluded, wizEquipment, wizCustomEquip, state.recipes]);
 
   const toggleDietOption = (d: DietaryOption) => {
     if (wizDiets.includes(d)) {
@@ -431,10 +431,10 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
       Number(wizBudget) || (wizRegion === 'AZ' ? 120 : 250)
     );
     const preferredPrepTimeMin = wizVibes.includes('quick_easy') ? 25 : 45;
+    // Never include regionCode or currencyCode: region & currency are controlled exclusively in Settings
     return {
-      regionCode: wizRegion,
-      currencyCode: wizCurrency,
       preferredSupermarket: wizStore,
+      preferredCuisine: wizCuisine,
       dietaryRestrictions: wizDiets,
       allergies: wizAllergies,
       excludedIngredients: wizExcluded,
@@ -485,9 +485,9 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
       az: 'Addım 4 – Büdcə və Müddət',
     },
     5: {
-      en: 'Step 5 – Food Vibe',
-      pl: 'Krok 5 – Styl Jedzenia (Food Vibe)',
-      az: 'Addım 5 – Yemək Tərzi (Food Vibe)',
+      en: 'Step 5 – Cuisine & Food Vibe',
+      pl: 'Krok 5 – Kuchnia i Styl Jedzenia',
+      az: 'Addım 5 – Mətbəx və Yemək Tərzi',
     },
     6: {
       en: "Step 6 – What's in Your Kitchen?",
@@ -648,54 +648,37 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
           <div>
             <div style={{ fontSize: 12, color: '#4B5563', marginBottom: 10 }}>
               {pickLocalizedText(lang, {
-                en: 'Select your country/region and preferred supermarket. MealPlanner will match recipe ingredients with realistic store packages and prices.',
-                pl: 'Wybierz swój region oraz preferowany supermarket. MealPlanner dopasuje składniki do rzeczywistych opakowań i cen w wybranej sieci.',
-                az: 'Ölkənizi və üstünlük verdiyiniz supermarketi seçin. MealPlanner resept ərzaqlarını real market qablaşdırmaları və qiymətləri ilə uyğunlaşdıracaq.',
+                en: 'Select your preferred supermarket. MealPlanner will match recipe ingredients with realistic store packages and prices.',
+                pl: 'Wybierz preferowany supermarket. MealPlanner dopasuje składniki do rzeczywistych opakowań i cen w wybranej sieci.',
+                az: 'Üstünlük verdiyiniz supermarketi seçin. MealPlanner resept ərzaqlarını real market qablaşdırmaları və qiymətləri ilə uyğunlaşdıracaq.',
               })}
             </div>
 
-            {/* Region Selector Pills */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-              {(['PL', 'AZ'] as RegionCode[]).map((rCode) => {
-                const reg = REGIONS[rCode];
-                const isSelected = wizRegion === rCode;
-                return (
-                  <button
-                    key={rCode}
-                    type="button"
-                    data-testid={`wizard-region-${rCode}`}
-                    onClick={() => handleSwitchWizardRegion(rCode)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '10px 12px',
-                      borderRadius: 12,
-                      border: isSelected ? '2px solid #196431' : '1px solid #D5E2D8',
-                      background: isSelected ? '#F2F9F4' : '#FFFFFF',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 20 }}>{reg.flag}</span>
-                      <div>
-                        <div style={{ fontSize: 12.5, fontWeight: 800, color: '#132A19' }}>
-                          {pickLocalizedText(lang, {
-                            en: reg.countryNameEn,
-                            pl: reg.countryNamePl,
-                            az: reg.countryNameAz,
-                          })}
-                        </div>
-                        <div style={{ fontSize: 10.5, color: '#647067', fontWeight: 700 }}>
-                          {reg.defaultCurrency === 'AZN' ? 'AZN (₼)' : 'PLN (zł)'}
-                        </div>
-                      </div>
-                    </div>
-                    {isSelected && <Check size={16} color="#196431" />}
-                  </button>
-                );
-              })}
+            {/* Read-only Settings Region Notice (region/currency are changed only in Settings) */}
+            <div
+              data-testid="wizard-region-readonly-note"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '9px 12px',
+                borderRadius: 11,
+                border: '1px solid #CBE4D2',
+                background: '#F2F9F4',
+                color: '#164A26',
+                fontSize: 11.5,
+                fontWeight: 700,
+                marginBottom: 14,
+              }}
+            >
+              <span style={{ fontSize: 16 }}>{REGIONS[wizRegion].flag}</span>
+              <span>
+                {pickLocalizedText(lang, {
+                  en: `Your region is ${REGIONS[wizRegion].countryNameEn}. To change it, go to Settings.`,
+                  pl: `Twój region to ${REGIONS[wizRegion].countryNamePl}. Aby go zmienić, przejdź do Ustawień.`,
+                  az: `Bölgəniz ${REGIONS[wizRegion].countryNameAz}. Dəyişmək üçün Ayarlara keçin.`,
+                })}
+              </span>
             </div>
 
             {/* Supermarkets Grid */}
@@ -1259,14 +1242,69 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
           </div>
         )}
 
-        {/* ==================== STEP 5: FOOD VIBE ==================== */}
+        {/* ==================== STEP 5: CUISINE & FOOD VIBE ==================== */}
         {step === 5 && (
           <div>
-            <div style={{ fontSize: 12, color: '#4B5563', marginBottom: 10 }}>
+            {/* Single-Select Cuisine Section (independent of Settings region, store, language, and currency) */}
+            <div style={{ fontSize: 11.5, fontWeight: 800, color: '#132A19', marginBottom: 6 }}>
               {pickLocalizedText(lang, {
-                en: 'Pick one or more Food Vibes to guide your recipe recommendations:',
-                pl: 'Wybierz jeden lub więcej stylów kulinarnych (Food Vibe), aby dopasować przepisy:',
-                az: 'Resept tövsiyələrini fərdiləşdirmək üçün bir və ya bir neçə yemək tərzi seçin:',
+                en: 'Preferred Cuisine (choose one):',
+                pl: 'Preferowana kuchnia (wybierz jedną):',
+                az: 'Üstünlük verdiyiniz mətbəx (birini seçin):',
+              })}
+            </div>
+            <div
+              role="radiogroup"
+              aria-label={pickLocalizedText(lang, {
+                en: 'Preferred Cuisine',
+                pl: 'Preferowana kuchnia',
+                az: 'Üstünlük verdiyiniz mətbəx',
+              })}
+              data-testid="wizard-cuisine-group"
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 6,
+                marginBottom: 12,
+              }}
+            >
+              {CUISINE_OPTIONS.map((c) => {
+                const active = wizCuisine === c.key;
+                return (
+                  <button
+                    key={c.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    data-testid={`wizard-cuisine-${c.key}`}
+                    onClick={() => setWizCuisine(c.key)}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 999,
+                      border: active ? '2px solid #196431' : '1px solid #D5E2D8',
+                      background: active ? '#ECF8F0' : '#FFFFFF',
+                      color: active ? '#132A19' : '#374151',
+                      fontSize: 11.5,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                    }}
+                  >
+                    <span>{c.icon}</span>
+                    <span>{c.label[lang]}</span>
+                    {active && <Check size={12} color="#196431" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ fontSize: 11.5, fontWeight: 800, color: '#132A19', marginBottom: 6 }}>
+              {pickLocalizedText(lang, {
+                en: 'Food Vibe (pick one or more):',
+                pl: 'Styl kulinarny — Food Vibe (wybierz jeden lub więcej):',
+                az: 'Yemək Tərzi — Food Vibe (bir və ya bir neçə seçin):',
               })}
             </div>
 
@@ -1596,9 +1634,10 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
                 </span>
               </div>
 
-              {/* 5 & 6. Food Vibe & Kitchen Equipment */}
+              {/* 5 & 6. Cuisine, Food Vibe & Kitchen Equipment */}
               <div
                 onClick={() => setStep(5)}
+                data-testid="wizard-summary-cuisine-card"
                 style={{
                   padding: '9px 12px',
                   borderRadius: 11,
@@ -1613,13 +1652,16 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
                 <div>
                   <div style={{ fontSize: 10, color: '#647067', fontWeight: 700 }}>
                     {pickLocalizedText(lang, {
-                      en: '5 & 6. Food Vibe & Kitchen Equipment',
-                      pl: '5 i 6. Styl kulinarny i Sprzęt kuchenny',
-                      az: '5 və 6. Yemək Tərzi və Mətbəx Avadanlığı',
+                      en: '5 & 6. Cuisine, Food Vibe & Kitchen Equipment',
+                      pl: '5 i 6. Kuchnia, Styl kulinarny i Sprzęt kuchenny',
+                      az: '5 və 6. Mətbəx, Yemək Tərzi və Mətbəx Avadanlığı',
                     })}
                   </div>
                   <div style={{ fontSize: 12, fontWeight: 800 }}>
-                    🔥 {wizVibes.length + wizCustomVibes.length}{' '}
+                    <span data-testid="wizard-summary-cuisine">
+                      🍽️ {getCuisineLabel(wizCuisine, lang)}
+                    </span>{' '}
+                    • 🔥 {wizVibes.length + wizCustomVibes.length}{' '}
                     {pickLocalizedText(lang, { en: 'vibes', pl: 'stylów', az: 'tərz' })} • 🍳{' '}
                     {wizEquipment.join(', ')}
                   </div>
@@ -1686,6 +1728,12 @@ export const AiPlanWizardModal: React.FC<AiPlanWizardModalProps> = ({
                     {pickLocalizedText(lang, { en: 'Days', pl: 'Dni', az: 'Gün' })} (
                     {activeResult.weeklyPlan.meals.length}{' '}
                     {pickLocalizedText(lang, { en: 'Meals', pl: 'Posiłków', az: 'Yemək' })})
+                    {wizCuisine !== 'any' && (
+                      <span data-testid="wizard-result-cuisine">
+                        {' '}
+                        • 🍽️ {getCuisineLabel(wizCuisine, lang)}
+                      </span>
+                    )}
                   </span>
                 </div>
                 <span

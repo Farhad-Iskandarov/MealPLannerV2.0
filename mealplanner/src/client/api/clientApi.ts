@@ -14,11 +14,16 @@ import {
   CurrencyCode,
   PriceMonitoringSummary,
   PriceSyncRunRecord,
+  BiedronkaSnapshotSummary,
+  BiedronkaProductDetail,
+  ShoppingItem,
 } from '../../shared/types';
 import {
   PromotionalBannerOffer,
   getPromotionalOffersForRegion,
+  applyVerifiedBiedronkaSnapshotToCatalogue,
 } from '../../server/supermarkets/catalogueData';
+import type { VerifiedBiedronkaSnapshotItem } from '../../server/monitoring/biedronkaGlovoMonitor';
 import {
   supermarketRegistry,
   NormalizedProductComparison,
@@ -34,13 +39,24 @@ import {
   getRecipeBaseCostForCurrency,
 } from '../../server/ai/aiMealPlanner';
 import { analyzeAndOptimizeBudget } from '../../server/budget/budgetOptimizer';
-import { validateRecipeForUser } from '../../server/validation/mealValidator';
+import {
+  validateRecipeForUser,
+  collectHardExclusionTerms,
+} from '../../server/validation/mealValidator';
 import {
   getDefaultCurrencyForRegion,
   resolveValidSupermarketForRegion,
   convertHistoricalMonetaryAmount,
   formatMoney,
 } from '../../shared/regionConfig';
+import {
+  isRegularPriceOnlyPolicyActive,
+  resolvePolicyEffectivePrice,
+} from '../../shared/pricingPolicy';
+import {
+  isValidCuisinePreference,
+  normalizeCuisinePreference,
+} from '../../shared/cuisineConfig';
 
 export interface AppStatePayload {
   user: User;
@@ -53,10 +69,132 @@ export interface AppStatePayload {
   priceComparisons: NormalizedProductComparison[];
   budgetAnalysis: BudgetAnalysis;
   priceMonitoring?: PriceMonitoringSummary;
+  biedronkaSnapshot?: {
+    summary: BiedronkaSnapshotSummary;
+    items: VerifiedBiedronkaSnapshotItem[];
+  };
 }
 
 const TOKEN_STORAGE_KEY = 'mealplanner_auth_token';
 const OFFLINE_STATE_KEY = 'mealplanner_offline_state_v2';
+const OFFLINE_BIEDRONKA_SNAPSHOT_KEY = 'mealplanner_biedronka_pl_snapshot_v1';
+const OFFLINE_BIEDRONKA_DETAILS_KEY = 'mealplanner_biedronka_pl_details_v1';
+
+export function getCachedBiedronkaProductDetail(sku: string): BiedronkaProductDetail | null {
+  if (!sku) return null;
+  try {
+    const raw = localStorage.getItem(OFFLINE_BIEDRONKA_DETAILS_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, BiedronkaProductDetail>;
+    const entry = map?.[sku];
+    if (entry && entry.sku === sku) {
+      return {
+        ...entry,
+        effectivePricePln: resolvePolicyEffectivePrice(
+          entry.regularPricePln,
+          entry.promoPricePln,
+          'PL',
+          'biedronka'
+        ),
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Normalizes a legacy cached ShoppingList (e.g. from localStorage) under the active pricing policy.
+ * For Poland Biedronka while regular-price-only policy is active, ensures regular totals and zero savings
+ * without erasing any stored promo fields on underlying snapshot/detail records.
+ */
+export function normalizeCachedShoppingListForPricingPolicy(list: ShoppingList): ShoppingList {
+  const regionCode: RegionCode = list.regionCode || 'PL';
+  const supermarketId = resolveValidSupermarketForRegion(list.supermarketId, regionCode);
+  if (!isRegularPriceOnlyPolicyActive(regionCode, supermarketId)) {
+    return list;
+  }
+
+  const normalizedItems = (list.items || []).map((item) => {
+    if (item.isPriced === false) return item;
+    const regularLine =
+      Number.isFinite(item.regularLineTotalPln) && item.regularLineTotalPln > 0
+        ? item.regularLineTotalPln
+        : item.lineTotalPln;
+    return {
+      ...item,
+      lineTotalPln: regularLine,
+      regularLineTotalPln: regularLine,
+      loyaltyRequired: false,
+    };
+  });
+
+  const estimatedTotalPln = Number(
+    normalizedItems.reduce((sum, it) => sum + (it.isPriced === false ? 0 : it.lineTotalPln), 0).toFixed(2)
+  );
+  const comparisonByStore = { ...list.comparisonByStore };
+  if (comparisonByStore.biedronka) {
+    comparisonByStore.biedronka = {
+      ...comparisonByStore.biedronka,
+      totalBasketPln: estimatedTotalPln,
+      savingsVsRegularPln: 0,
+    };
+  }
+
+  return {
+    ...list,
+    supermarketId,
+    items: normalizedItems,
+    estimatedTotalPln,
+    regularTotalWithoutPromosPln: estimatedTotalPln,
+    totalSavingsPln: 0,
+    comparisonByStore,
+  };
+}
+
+export function cacheBiedronkaProductDetail(detail: BiedronkaProductDetail): void {
+  if (!detail?.sku) return;
+  try {
+    const raw = localStorage.getItem(OFFLINE_BIEDRONKA_DETAILS_KEY);
+    const map: Record<string, BiedronkaProductDetail> = raw ? JSON.parse(raw) : {};
+    map[detail.sku] = detail;
+    localStorage.setItem(OFFLINE_BIEDRONKA_DETAILS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+export function cacheVerifiedBiedronkaSnapshotForOffline(
+  snapshot: AppStatePayload['biedronkaSnapshot'] | undefined
+): void {
+  if (!snapshot?.summary?.activeSnapshotId || !Array.isArray(snapshot.items) || snapshot.items.length === 0) {
+    return;
+  }
+  try {
+    localStorage.setItem(OFFLINE_BIEDRONKA_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+export function hydrateVerifiedBiedronkaSnapshotFromCache(): AppStatePayload['biedronkaSnapshot'] | null {
+  try {
+    const raw = localStorage.getItem(OFFLINE_BIEDRONKA_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AppStatePayload['biedronkaSnapshot'];
+    if (parsed?.summary?.activeSnapshotId && Array.isArray(parsed.items) && parsed.items.length > 0) {
+      applyVerifiedBiedronkaSnapshotToCatalogue(parsed.items, {
+        snapshotId: parsed.summary.activeSnapshotId,
+        activatedAt: parsed.summary.lastActivatedAt,
+      });
+      return parsed;
+    }
+  } catch {
+    // ignore malformed cache
+  }
+  return null;
+}
 
 export function getAuthToken(): string | null {
   try {
@@ -85,6 +223,12 @@ function isStandaloneApkEnvironment(): boolean {
   return proto === 'file:' || host === 'appassets.androidplatform.net' || !host;
 }
 
+class ApiResponseError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
+
 async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
   if (isStandaloneApkEnvironment()) {
     throw new Error('STANDALONE_APK_OFFLINE');
@@ -103,23 +247,72 @@ async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
     headers,
   });
 
-  const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.error || `Request failed with status ${res.status}`);
+    const data = await res.json().catch(() => null);
+    throw new ApiResponseError(res.status, data?.error || `Request failed with status ${res.status}`);
   }
-  return data as T;
+  return (await res.json()) as T;
 }
 
 /**
  * Creates a full offline fallback state (used when running inside standalone Android APK without server connection).
  */
 async function getOrInitOfflineState(): Promise<AppStatePayload> {
+  // Hydrate any cached verified Glovo Warsaw Biedronka snapshot into the PL catalogue before computing offline state
+  const cachedBiedronka = hydrateVerifiedBiedronkaSnapshotFromCache();
+
   try {
     const raw = localStorage.getItem(OFFLINE_STATE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as AppStatePayload;
       if (parsed?.user && parsed?.supermarkets) {
-        return parsed;
+        const reg: RegionCode = parsed.user.regionCode || parsed.user.preferences?.regionCode || 'PL';
+        // Coerce legacy saved Polish supermarket selections to Biedronka
+        const validStore = resolveValidSupermarketForRegion(
+          parsed.user.preferences?.preferredSupermarket,
+          reg
+        );
+        parsed.user.preferences.preferredSupermarket = validStore;
+        if (parsed.shoppingList) {
+          parsed.shoppingList.supermarketId = resolveValidSupermarketForRegion(
+            parsed.shoppingList.supermarketId,
+            reg
+          );
+        }
+        if (parsed.weeklyPlan) {
+          parsed.weeklyPlan.supermarketId = resolveValidSupermarketForRegion(
+            parsed.weeklyPlan.supermarketId,
+            reg
+          );
+        }
+        if (cachedBiedronka && !parsed.biedronkaSnapshot) {
+          parsed.biedronkaSnapshot = cachedBiedronka;
+        }
+        // Keep seeded recipes synchronized with latest cuisine-tagged recipes while preserving user custom recipes
+        const existingFavIds = new Set(
+          (parsed.recipes || []).filter((r) => r.isFavourite).map((r) => r.id)
+        );
+        const customRecipes = (parsed.recipes || []).filter((r) => r.isCustom);
+        const syncedRecipes = [
+          ...SEED_RECIPES.map((r) => ({ ...r, isFavourite: existingFavIds.has(r.id) })),
+          ...customRecipes,
+        ];
+        parsed.recipes = syncedRecipes;
+        // Also refresh recipe metadata/imageUrl inside cached/offline weeklyPlan.meals while preserving custom user photos
+        const syncedById = new Map(syncedRecipes.map((r) => [r.id, r]));
+        if (parsed.weeklyPlan?.meals?.length) {
+          parsed.weeklyPlan.meals = parsed.weeklyPlan.meals.map((meal) => {
+            const latest = syncedById.get(meal.recipe?.id);
+            if (!latest || latest.isCustom) return meal;
+            return { ...meal, recipe: latest };
+          });
+        }
+        if (parsed.user.preferences) {
+          parsed.user.preferences.preferredCuisine = normalizeCuisinePreference(
+            parsed.user.preferences.preferredCuisine
+          );
+        }
+        return recomputeOfflineDerived(parsed);
       }
     }
   } catch {
@@ -227,8 +420,13 @@ async function getOrInitOfflineState(): Promise<AppStatePayload> {
     meals: aiOut.meals,
     totalEstimatedBasketPln: shoppingList.estimatedTotalPln,
     totalMealPortionsCostPln: Number(aiOut.meals.reduce((s, m) => s + m.scaledCostPln, 0).toFixed(2)),
-    remainingBudgetPln: Number((user.preferences.weeklyBudgetPln - shoppingList.estimatedTotalPln).toFixed(2)),
+    remainingBudgetPln: shoppingList.hasIncompleteTotal
+      ? 0
+      : Number((user.preferences.weeklyBudgetPln - shoppingList.estimatedTotalPln).toFixed(2)),
     budgetUsagePercent: Math.round((shoppingList.estimatedTotalPln / user.preferences.weeklyBudgetPln) * 100),
+    hasIncompleteTotal: Boolean(shoppingList.hasIncompleteTotal),
+    unpricedItemsCount: shoppingList.items.filter((i) => i.isPriced === false).length,
+    isRemainingBudgetVerified: !shoppingList.hasIncompleteTotal,
     aiGenerationNotesPl: aiOut.notesPl,
     aiGenerationNotesEn: aiOut.notesEn,
     aiGenerationNotesAz: aiOut.notesAz,
@@ -265,6 +463,9 @@ function saveOfflineState(state: AppStatePayload): void {
   } catch {
     // ignore
   }
+  if (state.biedronkaSnapshot) {
+    cacheVerifiedBiedronkaSnapshotForOffline(state.biedronkaSnapshot);
+  }
 }
 
 async function recomputeOfflineDerived(state: AppStatePayload): Promise<AppStatePayload> {
@@ -297,20 +498,40 @@ async function recomputeOfflineDerived(state: AppStatePayload): Promise<AppState
       purchasedMap.set(item.canonicalIngredient.toLowerCase(), true);
     }
   }
-  const manualItems = state.shoppingList.items.filter((i) => i.isManual);
-  const shoppingList = buildSmartShoppingList({
-    shoppingListId: state.shoppingList.id,
-    userId: state.user.id,
-    weeklyPlanId: state.weeklyPlan.id,
-    supermarketId: activeStore,
-    regionCode,
-    currencyCode,
-    plannedMeals: state.weeklyPlan.meals,
-    pantryItems: state.pantry,
-    subtractPantry: state.shoppingList.subtractPantry,
-    existingPurchasedMap: purchasedMap,
-    manualItems,
-  });
+  const manualItems = state.shoppingList.items
+    .filter((i) => i.isManual)
+    .map((m) =>
+      isRegularPriceOnlyPolicyActive(regionCode, activeStore)
+        ? {
+            ...m,
+            lineTotalPln:
+              Number.isFinite(m.regularLineTotalPln) && m.regularLineTotalPln > 0
+                ? m.regularLineTotalPln
+                : m.lineTotalPln,
+            regularLineTotalPln:
+              Number.isFinite(m.regularLineTotalPln) && m.regularLineTotalPln > 0
+                ? m.regularLineTotalPln
+                : m.lineTotalPln,
+            loyaltyRequired: false,
+          }
+        : m
+    );
+  const shoppingList = normalizeCachedShoppingListForPricingPolicy(
+    buildSmartShoppingList({
+      shoppingListId: state.shoppingList.id,
+      userId: state.user.id,
+      weeklyPlanId: state.weeklyPlan.id,
+      supermarketId: activeStore,
+      regionCode,
+      currencyCode,
+      plannedMeals: state.weeklyPlan.meals,
+      pantryItems: state.pantry,
+      subtractPantry: state.shoppingList.subtractPantry,
+      existingPurchasedMap: purchasedMap,
+      manualItems,
+      hardExcludedTerms: collectHardExclusionTerms(state.user.preferences),
+    })
+  );
 
   const totalEstimatedBasketPln = shoppingList.estimatedTotalPln;
   const totalMealPortionsCostPln = Number(
@@ -328,8 +549,13 @@ async function recomputeOfflineDerived(state: AppStatePayload): Promise<AppState
     householdSize: state.user.preferences.householdSize,
     totalEstimatedBasketPln,
     totalMealPortionsCostPln,
-    remainingBudgetPln: Number((targetBudgetPln - totalEstimatedBasketPln).toFixed(2)),
+    remainingBudgetPln: shoppingList.hasIncompleteTotal
+      ? 0
+      : Number((targetBudgetPln - totalEstimatedBasketPln).toFixed(2)),
     budgetUsagePercent: Math.round((totalEstimatedBasketPln / Math.max(1, targetBudgetPln)) * 100),
+    hasIncompleteTotal: Boolean(shoppingList.hasIncompleteTotal),
+    unpricedItemsCount: shoppingList.items.filter((i) => i.isPriced === false).length,
+    isRemainingBudgetVerified: !shoppingList.hasIncompleteTotal,
   };
 
   const budgetAnalysis = analyzeAndOptimizeBudget({
@@ -591,9 +817,19 @@ export const clientApi = {
           preferences: state.user.preferences,
           availableRecipes: state.recipes,
           pantryItems: state.pantry,
+          subtractPantry: Boolean(state.shoppingList?.subtractPantry),
           variationSeed: Date.now() % 100,
         });
+        if (aiOut.isBudgetInfeasible) {
+          throw new Error(aiOut.notesEn);
+        }
         state.weeklyPlan.meals = aiOut.meals;
+        state.weeklyPlan.planDurationDays = state.user.preferences.planDurationDays || 7;
+        state.weeklyPlan.hasNoSafeRecipes = Boolean(aiOut.hasNoSafeRecipes);
+        state.weeklyPlan.noSafeRecipeSlots = aiOut.noSafeRecipeSlots;
+        state.weeklyPlan.aiGenerationNotesPl = aiOut.notesPl;
+        state.weeklyPlan.aiGenerationNotesEn = aiOut.notesEn;
+        state.weeklyPlan.aiGenerationNotesAz = aiOut.notesAz;
       }
 
       return recomputeOfflineDerived(state);
@@ -604,48 +840,82 @@ export const clientApi = {
     variationSeed?: number,
     preferences?: Partial<UserPreferences>
   ): Promise<AppStatePayload> {
+    // Wizard must never change Settings region or currency
+    const sanitizedPreferences: Partial<UserPreferences> | undefined = preferences
+      ? (() => {
+          const copy: Partial<UserPreferences> = { ...preferences };
+          delete copy.regionCode;
+          delete copy.currencyCode;
+          if (
+            copy.preferredCuisine !== undefined &&
+            copy.preferredCuisine !== null &&
+            !isValidCuisinePreference(copy.preferredCuisine)
+          ) {
+            throw new Error(
+              'Unsupported cuisine. Supported: any, italian, french, polish, greek, azerbaijani, spanish'
+            );
+          }
+          if (copy.preferredCuisine !== undefined) {
+            copy.preferredCuisine = normalizeCuisinePreference(copy.preferredCuisine);
+          }
+          return copy;
+        })()
+      : undefined;
+
     try {
       const data = await apiRequest<AppStatePayload>('/api/meal-plan/generate', {
         method: 'POST',
-        body: JSON.stringify({ variationSeed, preferences }),
+        body: JSON.stringify({ variationSeed, preferences: sanitizedPreferences }),
       });
       saveOfflineState(data);
       return data;
     } catch {
       const state = await getOrInitOfflineState();
-      if (preferences) {
-        const nextRegion: RegionCode =
-          preferences.regionCode || state.user.regionCode || state.user.preferences.regionCode || 'PL';
-        const nextCurrency: CurrencyCode =
-          preferences.currencyCode ||
-          state.user.currencyCode ||
-          state.user.preferences.currencyCode ||
-          getDefaultCurrencyForRegion(nextRegion);
-        const nextStore = resolveValidSupermarketForRegion(
-          preferences.preferredSupermarket ?? state.user.preferences.preferredSupermarket,
-          nextRegion
-        );
-        state.user.regionCode = nextRegion;
-        state.user.currencyCode = nextCurrency;
-        state.user.preferences = {
-          ...state.user.preferences,
-          ...preferences,
-          regionCode: nextRegion,
-          currencyCode: nextCurrency,
-          preferredSupermarket: nextStore,
-        };
-        state.shoppingList.supermarketId = nextStore;
-      }
+      const candidatePrefs: UserPreferences = sanitizedPreferences
+        ? (() => {
+            const existingRegion: RegionCode =
+              state.user.regionCode || state.user.preferences.regionCode || 'PL';
+            const existingCurrency: CurrencyCode =
+              state.user.currencyCode ||
+              state.user.preferences.currencyCode ||
+              getDefaultCurrencyForRegion(existingRegion);
+            const nextStore = resolveValidSupermarketForRegion(
+              sanitizedPreferences.preferredSupermarket ?? state.user.preferences.preferredSupermarket,
+              existingRegion
+            );
+            return {
+              ...state.user.preferences,
+              ...sanitizedPreferences,
+              regionCode: existingRegion,
+              currencyCode: existingCurrency,
+              preferredSupermarket: nextStore,
+              preferredCuisine:
+                sanitizedPreferences.preferredCuisine !== undefined
+                  ? normalizeCuisinePreference(sanitizedPreferences.preferredCuisine)
+                  : normalizeCuisinePreference(state.user.preferences.preferredCuisine),
+            };
+          })()
+        : state.user.preferences;
+
       const aiOut = await generateValidatedWeeklyMealPlan({
         weeklyPlanId: state.weeklyPlan.id,
         weekStartDate: '2026-11-10',
-        preferences: state.user.preferences,
+        preferences: candidatePrefs,
         availableRecipes: state.recipes,
         pantryItems: state.pantry,
+        subtractPantry: Boolean(state.shoppingList?.subtractPantry),
         variationSeed: variationSeed ?? Math.floor(Math.random() * 500) + 1,
       });
+      if (aiOut.isBudgetInfeasible) {
+        // Never overwrite saved offline plan or preferences when budget is infeasible
+        throw new Error(aiOut.notesEn);
+      }
+      state.user.preferences = candidatePrefs;
+      state.shoppingList.supermarketId = candidatePrefs.preferredSupermarket;
       state.weeklyPlan.meals = aiOut.meals;
       state.weeklyPlan.planDurationDays = state.user.preferences.planDurationDays || 7;
+      state.weeklyPlan.hasNoSafeRecipes = Boolean(aiOut.hasNoSafeRecipes);
+      state.weeklyPlan.noSafeRecipeSlots = aiOut.noSafeRecipeSlots;
       state.weeklyPlan.aiGenerationNotesPl = aiOut.notesPl;
       state.weeklyPlan.aiGenerationNotesEn = aiOut.notesEn;
       state.weeklyPlan.aiGenerationNotesAz = aiOut.notesAz;
@@ -671,7 +941,10 @@ export const clientApi = {
       const state = await getOrInitOfflineState();
       const recipe = state.recipes.find((r) => r.id === payload.recipeId);
       if (!recipe) throw new Error('Recipe not found');
-      const check = validateRecipeForUser(recipe, state.user.preferences);
+      const check = validateRecipeForUser(recipe, state.user.preferences, {
+        enforcePrepTime: false,
+        enforceCuisine: false,
+      });
       if (!check.valid) throw new Error(check.violations.join(' | '));
       const servings = payload.servings ?? state.user.preferences.householdSize;
       const scale = servings / Math.max(1, recipe.baseServings);
@@ -856,7 +1129,7 @@ export const clientApi = {
         mealType: payload.mealType || 'lunch',
         category: 'Budget-friendly',
         regionSuitability: ['PL', 'AZ'],
-        imageUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
+        imageUrl: payload.imageUrl || './assets/recipes/recipe-placeholder.svg',
         prepTimeMin: Number(payload.prepTimeMin) || 15,
         cookTimeMin: Number(payload.cookTimeMin) || 10,
         totalTimeMin: (Number(payload.prepTimeMin) || 15) + (Number(payload.cookTimeMin) || 10),
@@ -1109,13 +1382,19 @@ export const clientApi = {
       ) {
         const rep = state.recipes.find((r) => r.id === suggestion.replacementRecipeId);
         const meal = state.weeklyPlan.meals.find((m) => m.id === suggestion.targetPlannedMealId);
-        if (rep && meal) {
-          meal.recipe = rep;
-          const baseCost = getRecipeBaseCostForCurrency(rep, state.user.currencyCode || 'PLN');
-          meal.scaledCostPln = Number(
-            ((baseCost * meal.servings) / Math.max(1, rep.baseServings)).toFixed(2)
-          );
-          meal.scaledCaloriesKcal = rep.nutrition.caloriesKcal;
+        if (rep && meal && rep.mealType === meal.mealType) {
+          const check = validateRecipeForUser(rep, state.user.preferences, {
+            enforcePrepTime: false,
+            enforceCuisine: true,
+          });
+          if (check.valid) {
+            meal.recipe = rep;
+            const baseCost = getRecipeBaseCostForCurrency(rep, state.user.currencyCode || 'PLN');
+            meal.scaledCostPln = Number(
+              ((baseCost * meal.servings) / Math.max(1, rep.baseServings)).toFixed(2)
+            );
+            meal.scaledCaloriesKcal = rep.nutrition.caloriesKcal;
+          }
         }
       }
       return recomputeOfflineDerived(state);
@@ -1141,6 +1420,122 @@ export const clientApi = {
     } catch {
       const state = await getOrInitOfflineState();
       return { state: await recomputeOfflineDerived(state) };
+    }
+  },
+
+  async fetchBiedronkaProductDetail(
+    item: Pick<
+      ShoppingItem,
+      | 'sku'
+      | 'namePl'
+      | 'matchedProductNamePl'
+      | 'packageSizeLabel'
+      | 'unitPricePln'
+      | 'lineTotalPln'
+      | 'regularLineTotalPln'
+      | 'recommendedPackages'
+      | 'priceObservedAt'
+      | 'glovoProductId'
+      | 'externalProductId'
+      | 'storeProductId'
+      | 'glovoProductUrl'
+      | 'sourceName'
+      | 'storeLocation'
+    >
+  ): Promise<BiedronkaProductDetail> {
+    const sku = String(item.sku || '').trim();
+    const pkgCount = Math.max(1, item.recommendedPackages || 1);
+    const regularPackPrice = Number((item.regularLineTotalPln / pkgCount).toFixed(2));
+    const linePackPrice = Number((item.lineTotalPln / pkgCount).toFixed(2));
+    const rawPromoPackPrice =
+      regularPackPrice > linePackPrice + 0.005 ? linePackPrice : null;
+    const effectivePackPrice = resolvePolicyEffectivePrice(
+      regularPackPrice || linePackPrice,
+      rawPromoPackPrice,
+      'PL',
+      'biedronka'
+    );
+
+    const fallbackOffline: BiedronkaProductDetail = {
+      sku,
+      productId: item.glovoProductId ?? null,
+      externalProductId: item.externalProductId ?? null,
+      storeProductId: item.storeProductId ?? null,
+      storeId: null,
+      storeAddressId: null,
+      storeSlug: 'biedronka-waw',
+      sourceName: item.sourceName || 'Glovo Warsaw (Biedronka)',
+      storeLocation: item.storeLocation || 'Warszawa, Polska (Glovo • biedronka-waw)',
+      namePl: item.matchedProductNamePl || item.namePl,
+      packageLabelPl: item.packageSizeLabel || null,
+      regularPricePln: regularPackPrice || effectivePackPrice,
+      promoPricePln: rawPromoPackPrice,
+      effectivePricePln: effectivePackPrice,
+      priceObservedAt: item.priceObservedAt ?? null,
+      imageUrl: null,
+      glovoProductUrl: item.glovoProductUrl ?? null,
+      description: null,
+      ingredients: null,
+      nutritionBasis: null,
+      nutritionRows: [],
+      countryOfOrigin: null,
+      detailStatus: 'OFFLINE_UNAVAILABLE',
+      detailError: 'Offline or server unreachable; product details are not cached on this device.',
+      retryAfterAt: null,
+      detailFetchedAt: null,
+      fromCache: false,
+    };
+
+    if (!sku || !(item.glovoProductId || item.storeProductId || item.externalProductId)) {
+      return {
+        ...fallbackOffline,
+        detailStatus: 'MISSING_IDENTITY',
+        detailError: 'No verified Biedronka SKU is associated with this item.',
+      };
+    }
+
+    try {
+      const detail = await apiRequest<BiedronkaProductDetail>(
+        `/api/monitoring/biedronka/product-detail/${encodeURIComponent(sku)}`
+      );
+      const normalizedDetail: BiedronkaProductDetail = {
+        ...detail,
+        effectivePricePln: resolvePolicyEffectivePrice(
+          detail.regularPricePln,
+          detail.promoPricePln,
+          'PL',
+          'biedronka'
+        ),
+      };
+      if (normalizedDetail && (normalizedDetail.detailStatus === 'OK' || normalizedDetail.detailStatus === 'CACHED')) {
+        cacheBiedronkaProductDetail(normalizedDetail);
+      }
+      return normalizedDetail;
+    } catch (error) {
+      if (error instanceof ApiResponseError && error.status === 404) {
+        return {
+          ...fallbackOffline,
+          detailStatus: 'MISSING_IDENTITY',
+          detailError: 'This product is unavailable in the active Biedronka catalog.',
+        };
+      }
+      const cached = getCachedBiedronkaProductDetail(sku);
+      if (cached) {
+        return {
+          ...cached,
+          priceObservedAt: item.priceObservedAt ?? cached.priceObservedAt ?? null,
+          detailStatus: 'CACHED',
+          fromCache: true,
+        };
+      }
+      if (error instanceof ApiResponseError) {
+        return {
+          ...fallbackOffline,
+          detailStatus: 'UPSTREAM_ERROR',
+          detailError: 'The server could not load product details.',
+        };
+      }
+      return fallbackOffline;
     }
   },
 };

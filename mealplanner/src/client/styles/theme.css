@@ -1137,7 +1137,6 @@ textarea:focus-visible {
   justify-content: space-between;
   gap: 8px;
   border: 1px solid var(--mp-border);
-  cursor: pointer;
   contain: layout style;
   font-variant-numeric: tabular-nums;
   transition: border-color 0.14s var(--mp-ease-out), background-color 0.14s var(--mp-ease-out), transform 0.12s var(--mp-ease-out);
@@ -1149,6 +1148,30 @@ textarea:focus-visible {
 
 .mp-shop-item-card:active {
   transform: scale(0.985);
+}
+
+/* The product and price are one control. The checkbox and delete button are separate. */
+.mp-shop-detail-trigger {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mp-shop-detail-trigger:focus-visible {
+  outline: 2px solid #196431;
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 /* === Screen 5: Profile === */
@@ -1331,6 +1354,20 @@ textarea:focus-visible {
   overflow: hidden;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.28);
   animation: mpModalCardIn 0.18s var(--mp-ease-out);
+}
+
+.mp-product-detail-backdrop {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.mp-product-detail-card {
+  box-sizing: border-box;
+  display: block;
+  max-height: 100%;
+  padding: 14px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 .mp-modal-header {

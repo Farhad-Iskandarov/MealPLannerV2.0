@@ -30,39 +30,39 @@
     "semantic_hash": ""
   },
   "mealplanner/package.json": {
-    "mtime": 1794783636.573786,
-    "seen": 1795390175.6677787,
-    "ast_hash": "6ddaf7c181fc061a3714b6cbc3927dc0",
+    "mtime": 1795391212.3670382,
+    "seen": 1795391861.9463675,
+    "ast_hash": "c3d4617bd2f479dc702f844ab1662524",
     "semantic_hash": ""
   },
   "mealplanner/scripts/build-apk.mjs": {
-    "mtime": 1794785778.6591918,
-    "seen": 1795390175.6677787,
-    "ast_hash": "91c0286086653cd435172273005d29cc",
+    "mtime": 1795464949.4995248,
+    "seen": 1795465095.6274335,
+    "ast_hash": "a05601e0f9f2ce4dfbbd578d3b5812ff",
     "semantic_hash": ""
   },
   "mealplanner/scripts/build-client.mjs": {
-    "mtime": 1794785616.3119545,
-    "seen": 1795390175.6677787,
-    "ast_hash": "18f4637e7e28be6a8871f312acfacfff",
+    "mtime": 1795464926.8076081,
+    "seen": 1795465095.6274335,
+    "ast_hash": "e3cafb505edd2756a5df8e368e393446",
     "semantic_hash": ""
   },
   "mealplanner/src/client/MealPlannerApp.tsx": {
-    "mtime": 1794792001.4470034,
-    "seen": 1795390175.6677787,
-    "ast_hash": "0fb9481d51f7a0af5fd08bf0550f11ff",
+    "mtime": 1795462182.9689348,
+    "seen": 1795462570.702719,
+    "ast_hash": "e3f0885f84891225bb4f0fbdece3f125",
     "semantic_hash": ""
   },
   "mealplanner/src/client/api/clientApi.ts": {
-    "mtime": 1794788935.8252873,
-    "seen": 1795390175.6677787,
-    "ast_hash": "a2ca2e7ba5cdab179368063311e51951",
+    "mtime": 1795465114.1137064,
+    "seen": 1795465475.0712638,
+    "ast_hash": "65b33ee6058c2d54a05a3e4be3eb0b38",
     "semantic_hash": ""
   },
   "mealplanner/src/client/components/AiPlanWizardModal.tsx": {
-    "mtime": 1794786867.3582969,
-    "seen": 1795390175.6677787,
-    "ast_hash": "9d69f76127a656ce43897609405a0a1c",
+    "mtime": 1795398665.3944309,
+    "seen": 1795398846.6486342,
+    "ast_hash": "f41bd84078455788db6af172dcc74819",
     "semantic_hash": ""
   },
   "mealplanner/src/client/components/BrandAssets.tsx": {
@@ -72,9 +72,9 @@
     "semantic_hash": ""
   },
   "mealplanner/src/client/components/Modals.tsx": {
-    "mtime": 1794792038.3379247,
-    "seen": 1795390175.6677787,
-    "ast_hash": "47896840ac25b1d6924d837f65d64535",
+    "mtime": 1795396693.4661968,
+    "seen": 1795396975.0491807,
+    "ast_hash": "c75cdb696e55c9425de7859319469164",
     "semantic_hash": ""
   },
   "mealplanner/src/client/main.tsx": {
@@ -84,15 +84,15 @@
     "semantic_hash": ""
   },
   "mealplanner/src/server/ai/aiMealPlanner.ts": {
-    "mtime": 1794785075.397435,
-    "seen": 1795390175.6677787,
-    "ast_hash": "f567cf299e330478f5c2c85c3212d9ea",
+    "mtime": 1795462883.2912734,
+    "seen": 1795462926.3658867,
+    "ast_hash": "6d9f9b5ee16ac331df18f0d923ddb682",
     "semantic_hash": ""
   },
   "mealplanner/src/server/app.ts": {
-    "mtime": 1794788569.844237,
-    "seen": 1795390175.6677787,
-    "ast_hash": "52370c095aad78883a9a289b454a656c",
+    "mtime": 1795465024.5685074,
+    "seen": 1795465095.6274335,
+    "ast_hash": "96f11d587d43d2f0ee1d1a0f1ee18f5f",
     "semantic_hash": ""
   },
   "mealplanner/src/server/auth/authService.ts": {
@@ -102,27 +102,27 @@
     "semantic_hash": ""
   },
   "mealplanner/src/server/budget/budgetOptimizer.ts": {
-    "mtime": 1794783636.5861762,
-    "seen": 1795390175.6677787,
-    "ast_hash": "32828ea9ef93780fe7390c11012e7f02",
+    "mtime": 1795462125.9859154,
+    "seen": 1795462570.702719,
+    "ast_hash": "f7e7510fe9b6169ac3f0ed0c7325295d",
     "semantic_hash": ""
   },
   "mealplanner/src/server/db/database.ts": {
-    "mtime": 1794791902.0474226,
-    "seen": 1795390175.6677787,
-    "ast_hash": "ecb482f4c1b29e60588f387247f65746",
+    "mtime": 1795462382.163757,
+    "seen": 1795462570.702719,
+    "ast_hash": "75656c15f58af50d9e3620fdeb2b2608",
     "semantic_hash": ""
   },
   "mealplanner/src/server/index.ts": {
-    "mtime": 1794788533.5843248,
-    "seen": 1795390175.6677787,
-    "ast_hash": "eded0528fec290757f4356dc39de1af0",
+    "mtime": 1795391214.380975,
+    "seen": 1795391861.9463675,
+    "ast_hash": "f8baa956eed0f0d52942e3b6f8877956",
     "semantic_hash": ""
   },
   "mealplanner/src/server/matching/quantityEngine.ts": {
-    "mtime": 1794788168.0888422,
-    "seen": 1795390175.6677787,
-    "ast_hash": "24dc0491286f423696b250335db1de2d",
+    "mtime": 1795399125.0692015,
+    "seen": 1795399549.8544059,
+    "ast_hash": "c88cd5125337dbdff1ed98fc4f663480",
     "semantic_hash": ""
   },
   "mealplanner/src/server/monitoring/bazarstoreMonitor.ts": {
@@ -132,27 +132,27 @@
     "semantic_hash": ""
   },
   "mealplanner/src/server/recipes/recipeSeedData.ts": {
-    "mtime": 1794791343.330871,
-    "seen": 1795390175.6677787,
-    "ast_hash": "38d8170f91800dc4855cece7e4b18d9f",
+    "mtime": 1795466809.3812544,
+    "seen": 1795466867.5252595,
+    "ast_hash": "2f41761ca5fa70025709191f7a3beeb8",
     "semantic_hash": ""
   },
   "mealplanner/src/server/supermarkets/catalogueData.ts": {
-    "mtime": 1794791641.227266,
-    "seen": 1795390175.6677787,
-    "ast_hash": "c2b360cb8939900531ce34cd6874026c",
+    "mtime": 1795462222.935017,
+    "seen": 1795462570.702719,
+    "ast_hash": "6dff095b16cd3a045cf2566deb1e0633",
     "semantic_hash": ""
   },
   "mealplanner/src/server/supermarkets/supermarketService.ts": {
-    "mtime": 1794783636.591092,
-    "seen": 1795390175.6677787,
-    "ast_hash": "c8194f05f78c4d619b6b9897700907e0",
+    "mtime": 1795390825.460366,
+    "seen": 1795391861.9463675,
+    "ast_hash": "a43cc92053a4fedfe1a5a24b951e5af2",
     "semantic_hash": ""
   },
   "mealplanner/src/server/validation/mealValidator.ts": {
-    "mtime": 1794783636.5924456,
-    "seen": 1795390175.6677787,
-    "ast_hash": "3da160c55f7a787f8adb1504806b03e2",
+    "mtime": 1795461788.4850008,
+    "seen": 1795462570.702719,
+    "ast_hash": "5fd69df8b4bc8dc114825b2a05869963",
     "semantic_hash": ""
   },
   "mealplanner/src/shared/i18n.ts": {
@@ -168,27 +168,27 @@
     "semantic_hash": ""
   },
   "mealplanner/src/shared/regionConfig.ts": {
-    "mtime": 1794791942.542761,
-    "seen": 1795390175.6677787,
-    "ast_hash": "d203e5263b5d5c6ed24479653e3f1ee7",
+    "mtime": 1795390771.6736672,
+    "seen": 1795391861.9463675,
+    "ast_hash": "4d2ece317ff82edb1c2ba3d94cf488fd",
     "semantic_hash": ""
   },
   "mealplanner/src/shared/types.ts": {
-    "mtime": 1794788026.21061,
-    "seen": 1795390175.6677787,
-    "ast_hash": "a8eadfa4dd46d57d6e48fc14872da4d2",
+    "mtime": 1795462121.3827953,
+    "seen": 1795462570.703718,
+    "ast_hash": "e4987faad94faf3bd272dfb283fe75f7",
     "semantic_hash": ""
   },
   "mealplanner/tests/api.integration.test.ts": {
-    "mtime": 1794788875.0785675,
-    "seen": 1795390175.6677787,
-    "ast_hash": "472d99ecef1279d159c74bbe4ff16ef4",
+    "mtime": 1795458944.6527817,
+    "seen": 1795459038.3202546,
+    "ast_hash": "248663377fb1558e22ce56e949e03042",
     "semantic_hash": ""
   },
   "mealplanner/tests/mealplanner.test.ts": {
-    "mtime": 1794792093.5301232,
-    "seen": 1795390175.6677787,
-    "ast_hash": "70803c195450fe7d6ba99c5da49a0a02",
+    "mtime": 1795398783.3970523,
+    "seen": 1795398846.6486342,
+    "ast_hash": "a48a5ba10d58448c962bbe8282a67534",
     "semantic_hash": ""
   },
   "mealplanner/tsconfig.json": {
@@ -219,6 +219,510 @@
     "mtime": 1794783636.573786,
     "seen": 1795390175.6677787,
     "ast_hash": "76cce3edcbd9326c771add481d9498cf",
+    "semantic_hash": ""
+  },
+  "mealplanner/scripts/refresh-biedronka-pl.ts": {
+    "mtime": 1795391603.1599312,
+    "seen": 1795391861.9463675,
+    "ast_hash": "d4c546e7b30735209e64841efd2509a4",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/monitoring/biedronkaGlovoMonitor.ts": {
+    "mtime": 1795461784.7636073,
+    "seen": 1795462570.702719,
+    "ast_hash": "3e4c46567c2fbe762d5aefb27aef5cca",
+    "semantic_hash": ""
+  },
+  "mealplanner/tests/poland-rollout.test.ts": {
+    "mtime": 1795396851.8539898,
+    "seen": 1795396975.0491807,
+    "ast_hash": "8a60f5dd1d49ace847678aef1b475ad3",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/shared/dateFormat.ts": {
+    "mtime": 1795392710.4391863,
+    "seen": 1795393357.2373438,
+    "ast_hash": "1f66bb520be38d2d9e78bffba76f159a",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/shared/pricingPolicy.ts": {
+    "mtime": 1795396467.9632046,
+    "seen": 1795396975.0491807,
+    "ast_hash": "c8682bd96956bff56712dd605992d580",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/server/recipes/cuisineRecipesData.ts": {
+    "mtime": 1795466809.3870735,
+    "seen": 1795466867.5252595,
+    "ast_hash": "1dcab0a01e10e5f6327be7c8a4e705c7",
+    "semantic_hash": ""
+  },
+  "mealplanner/src/shared/cuisineConfig.ts": {
+    "mtime": 1795397858.4391518,
+    "seen": 1795398846.6486342,
+    "ast_hash": "de9a7b6ad4f7f1ea5c23782fa52e2919",
+    "semantic_hash": ""
+  },
+  "mealplanner/tests/cuisine-wizard.test.ts": {
+    "mtime": 1795466836.6689208,
+    "seen": 1795466867.5252595,
+    "ast_hash": "02b50ead88682994608332d56ed1eda0",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/recipe-placeholder.svg": {
+    "mtime": 1795464924.7950916,
+    "seen": 1795465095.6274335,
+    "ast_hash": "d2a9c43e5c6a92c58a6ffe8045963bb5",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/recipe-placeholder.svg": {
+    "mtime": 1795464924.7950916,
+    "seen": 1795465095.6274335,
+    "ast_hash": "d2a9c43e5c6a92c58a6ffe8045963bb5",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-barley-banana-sunflower.webp": {
+    "mtime": 1795465425.198,
+    "seen": 1795465475.0712638,
+    "ast_hash": "da2d95dc57c10d7558031e7a71e03dcd",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-buckwheat-apple-sunflower.webp": {
+    "mtime": 1795465425.028,
+    "seen": 1795465475.0712638,
+    "ast_hash": "c9dca4dacf2ca51dc2b6388cea217875",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-buckwheat-tofu-onion.webp": {
+    "mtime": 1795465425.117,
+    "seen": 1795465475.0712638,
+    "ast_hash": "122ad1ee6ffaf41dc7f384409efe4ecf",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-barley-banana-sunflower.webp": {
+    "mtime": 1795465425.198,
+    "seen": 1795465475.0712638,
+    "ast_hash": "da2d95dc57c10d7558031e7a71e03dcd",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-buckwheat-apple-sunflower.webp": {
+    "mtime": 1795465425.028,
+    "seen": 1795465475.0712638,
+    "ast_hash": "c9dca4dacf2ca51dc2b6388cea217875",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-buckwheat-tofu-onion.webp": {
+    "mtime": 1795465425.117,
+    "seen": 1795465475.0712638,
+    "ast_hash": "122ad1ee6ffaf41dc7f384409efe4ecf",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/azerbaijani-dovga.webp": {
+    "mtime": 1795466809.241,
+    "seen": 1795466867.5252595,
+    "ast_hash": "af80119fc319dfecca0261726c5d54e3",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/azerbaijani-qutab.webp": {
+    "mtime": 1795466809.307,
+    "seen": 1795466867.5252595,
+    "ast_hash": "519026f705ae372bacb005c9ce20acae",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/azerbaijani-village-breakfast.webp": {
+    "mtime": 1795466809.372,
+    "seen": 1795466867.5252595,
+    "ast_hash": "32fb439147250f99266497068c1ce926",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/french-normandy-apple-oats.webp": {
+    "mtime": 1795466808.73,
+    "seen": 1795466867.5252595,
+    "ast_hash": "4b8b1a68ca65e873431c1e8695f4af25",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/french-onion-soup.webp": {
+    "mtime": 1795466808.84,
+    "seen": 1795466867.5252595,
+    "ast_hash": "441fca6bdeeb78963475bc1c062dd948",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/french-pain-perdu-apples.webp": {
+    "mtime": 1795466808.656,
+    "seen": 1795466867.5252595,
+    "ast_hash": "5974b276dfcad2d4bf9d4576acaef1b2",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/french-potato-spinach-gratin.webp": {
+    "mtime": 1795466808.908,
+    "seen": 1795466867.5252595,
+    "ast_hash": "a2e1a9250824664b7406829062039866",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/french-ratatouille-lentils.webp": {
+    "mtime": 1795466808.797,
+    "seen": 1795466867.5252595,
+    "ast_hash": "337ae771819d4005a7ab566e5a4e2b82",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/greek-briam-roasted-veg.webp": {
+    "mtime": 1795466808.973,
+    "seen": 1795466867.5252595,
+    "ast_hash": "b0dc7e5481a752bdf3c3df3666050b9b",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/greek-spanakorizo.webp": {
+    "mtime": 1795466809.044,
+    "seen": 1795466867.5252595,
+    "ast_hash": "16b3c9fda856de5bd33fc5cdbc998409",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/italian-apple-banana-oats.webp": {
+    "mtime": 1795466808.538,
+    "seen": 1795466867.5252595,
+    "ast_hash": "12c7cda9a63413f86ca67e34c402fdfd",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/italian-risotto-verdure.webp": {
+    "mtime": 1795466808.594,
+    "seen": 1795466867.5252595,
+    "ast_hash": "6492205ea15c9a9fd1fb67ecec2c76d6",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/oatmeal-banana.webp": {
+    "mtime": 1795466807.438,
+    "seen": 1795466867.5252595,
+    "ast_hash": "1dfa010731f8445c01815613dd8c9805",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-apple-racuchy.webp": {
+    "mtime": 1795466807.889,
+    "seen": 1795466867.5252595,
+    "ast_hash": "a0e2853a951962dd98895c64e4673e81",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-barley-tofu-carrots.webp": {
+    "mtime": 1795466807.37,
+    "seen": 1795466867.5252595,
+    "ast_hash": "dde79b87dc80d1b60eb4024af2bbc5fb",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-beetroot-chickpea-ragout.webp": {
+    "mtime": 1795466807.82,
+    "seen": 1795466867.5252595,
+    "ast_hash": "b0e289702ea2537130acb1df319e58da",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-buckwheat-blueberries-nuts.webp": {
+    "mtime": 1795466807.506,
+    "seen": 1795466867.5252595,
+    "ast_hash": "e03551f6d4647c48009c4086b3167388",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-buckwheat-forest-mushrooms.webp": {
+    "mtime": 1795466807.638,
+    "seen": 1795466867.5252595,
+    "ast_hash": "e5637a7810fed6c3257f5b385fc05295",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-cottage-cheese-toast.webp": {
+    "mtime": 1795466808.01,
+    "seen": 1795466867.5252595,
+    "ast_hash": "11ee0b0653781f2eef98f8d3468955e4",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-forest-mushroom-cashew-soup.webp": {
+    "mtime": 1795466807.704,
+    "seen": 1795466867.5252595,
+    "ast_hash": "3e8138241f8693f7689ffcdcdde8eb35",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-herb-roasted-pork-loin.webp": {
+    "mtime": 1795466808.072,
+    "seen": 1795466867.5252595,
+    "ast_hash": "b1ede36ee8205d3d743c9e5382fc41b4",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-krupnik-barley-soup.webp": {
+    "mtime": 1795466807.956,
+    "seen": 1795466867.5252595,
+    "ast_hash": "e70bc39b781d1aa2632a93eeb00fc0ee",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-paprika-chickpea-potato-stew.webp": {
+    "mtime": 1795466807.303,
+    "seen": 1795466867.5252595,
+    "ast_hash": "c010184d577afd97cae71a0a8beda94e",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-potato-chicken-broccoli-casserole.webp": {
+    "mtime": 1795466808.219,
+    "seen": 1795466867.5252595,
+    "ast_hash": "84e309708eb709ca985042a3bcf46ef3",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-red-lentil-leczo.webp": {
+    "mtime": 1795466808.152,
+    "seen": 1795466867.5252595,
+    "ast_hash": "a24ff28c8e563f1a7fa304d92bbc5cf2",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-red-lentil-potato-stew.webp": {
+    "mtime": 1795466808.343,
+    "seen": 1795466867.5252595,
+    "ast_hash": "1923c8f3a23884a6919f4b273fb73ed7",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-skillet-mushrooms-tofu-potatoes.webp": {
+    "mtime": 1795466807.772,
+    "seen": 1795466867.5252595,
+    "ast_hash": "716fac77a65619aa4e29a7a58f1e2eb0",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-tofu-avocado-hummus-pistachios.webp": {
+    "mtime": 1795466807.572,
+    "seen": 1795466867.5252595,
+    "ast_hash": "f81ae4fbf7b0eba2e8241ac4d0489541",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-tofu-scramble-tofucznica.webp": {
+    "mtime": 1795466808.272,
+    "seen": 1795466867.5252595,
+    "ast_hash": "f2e688bbfbf65d380184cb8f426bdfa6",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/polish-tomato-rice-tofu-carrots.webp": {
+    "mtime": 1795466807.237,
+    "seen": 1795466867.5252595,
+    "ast_hash": "876e031e21ef7550e61809f9ba33225e",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/red-lentil-tomato-stew-rice.webp": {
+    "mtime": 1795466808.469,
+    "seen": 1795466867.5252595,
+    "ast_hash": "d48d0f1d3e949e92458b3af65127110a",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/spanish-lentejas-estofadas.webp": {
+    "mtime": 1795466809.172,
+    "seen": 1795466867.5252595,
+    "ast_hash": "a80f1d78eed5d826805db6de8d5c899e",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/spanish-pan-con-tomate.webp": {
+    "mtime": 1795466809.103,
+    "seen": 1795466867.5252595,
+    "ast_hash": "21d9e4f1043f1f8295ed383774748b1d",
+    "semantic_hash": ""
+  },
+  "mealplanner/android/app/src/main/assets/www/assets/recipes/vegan-apple-banana-porridge.webp": {
+    "mtime": 1795466808.407,
+    "seen": 1795466867.5252595,
+    "ast_hash": "d7fc221dab138ee1a44a586b6d2f030d",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/azerbaijani-dovga.webp": {
+    "mtime": 1795466809.241,
+    "seen": 1795466867.5252595,
+    "ast_hash": "af80119fc319dfecca0261726c5d54e3",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/azerbaijani-qutab.webp": {
+    "mtime": 1795466809.307,
+    "seen": 1795466867.5252595,
+    "ast_hash": "519026f705ae372bacb005c9ce20acae",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/azerbaijani-village-breakfast.webp": {
+    "mtime": 1795466809.372,
+    "seen": 1795466867.5252595,
+    "ast_hash": "32fb439147250f99266497068c1ce926",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/french-normandy-apple-oats.webp": {
+    "mtime": 1795466808.73,
+    "seen": 1795466867.5252595,
+    "ast_hash": "4b8b1a68ca65e873431c1e8695f4af25",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/french-onion-soup.webp": {
+    "mtime": 1795466808.84,
+    "seen": 1795466867.5252595,
+    "ast_hash": "441fca6bdeeb78963475bc1c062dd948",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/french-pain-perdu-apples.webp": {
+    "mtime": 1795466808.656,
+    "seen": 1795466867.5252595,
+    "ast_hash": "5974b276dfcad2d4bf9d4576acaef1b2",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/french-potato-spinach-gratin.webp": {
+    "mtime": 1795466808.908,
+    "seen": 1795466867.5252595,
+    "ast_hash": "a2e1a9250824664b7406829062039866",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/french-ratatouille-lentils.webp": {
+    "mtime": 1795466808.797,
+    "seen": 1795466867.5252595,
+    "ast_hash": "337ae771819d4005a7ab566e5a4e2b82",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/greek-briam-roasted-veg.webp": {
+    "mtime": 1795466808.973,
+    "seen": 1795466867.5252595,
+    "ast_hash": "b0dc7e5481a752bdf3c3df3666050b9b",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/greek-spanakorizo.webp": {
+    "mtime": 1795466809.044,
+    "seen": 1795466867.5252595,
+    "ast_hash": "16b3c9fda856de5bd33fc5cdbc998409",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/italian-apple-banana-oats.webp": {
+    "mtime": 1795466808.538,
+    "seen": 1795466867.5252595,
+    "ast_hash": "12c7cda9a63413f86ca67e34c402fdfd",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/italian-risotto-verdure.webp": {
+    "mtime": 1795466808.594,
+    "seen": 1795466867.5252595,
+    "ast_hash": "6492205ea15c9a9fd1fb67ecec2c76d6",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/oatmeal-banana.webp": {
+    "mtime": 1795466807.438,
+    "seen": 1795466867.5252595,
+    "ast_hash": "1dfa010731f8445c01815613dd8c9805",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-apple-racuchy.webp": {
+    "mtime": 1795466807.889,
+    "seen": 1795466867.5252595,
+    "ast_hash": "a0e2853a951962dd98895c64e4673e81",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-barley-tofu-carrots.webp": {
+    "mtime": 1795466807.37,
+    "seen": 1795466867.5252595,
+    "ast_hash": "dde79b87dc80d1b60eb4024af2bbc5fb",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-beetroot-chickpea-ragout.webp": {
+    "mtime": 1795466807.82,
+    "seen": 1795466867.5252595,
+    "ast_hash": "b0e289702ea2537130acb1df319e58da",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-buckwheat-blueberries-nuts.webp": {
+    "mtime": 1795466807.506,
+    "seen": 1795466867.5252595,
+    "ast_hash": "e03551f6d4647c48009c4086b3167388",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-buckwheat-forest-mushrooms.webp": {
+    "mtime": 1795466807.638,
+    "seen": 1795466867.5252595,
+    "ast_hash": "e5637a7810fed6c3257f5b385fc05295",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-cottage-cheese-toast.webp": {
+    "mtime": 1795466808.01,
+    "seen": 1795466867.5252595,
+    "ast_hash": "11ee0b0653781f2eef98f8d3468955e4",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-forest-mushroom-cashew-soup.webp": {
+    "mtime": 1795466807.704,
+    "seen": 1795466867.5252595,
+    "ast_hash": "3e8138241f8693f7689ffcdcdde8eb35",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-herb-roasted-pork-loin.webp": {
+    "mtime": 1795466808.072,
+    "seen": 1795466867.5252595,
+    "ast_hash": "b1ede36ee8205d3d743c9e5382fc41b4",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-krupnik-barley-soup.webp": {
+    "mtime": 1795466807.956,
+    "seen": 1795466867.5252595,
+    "ast_hash": "e70bc39b781d1aa2632a93eeb00fc0ee",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-paprika-chickpea-potato-stew.webp": {
+    "mtime": 1795466807.303,
+    "seen": 1795466867.5252595,
+    "ast_hash": "c010184d577afd97cae71a0a8beda94e",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-potato-chicken-broccoli-casserole.webp": {
+    "mtime": 1795466808.219,
+    "seen": 1795466867.5252595,
+    "ast_hash": "84e309708eb709ca985042a3bcf46ef3",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-red-lentil-leczo.webp": {
+    "mtime": 1795466808.152,
+    "seen": 1795466867.5252595,
+    "ast_hash": "a24ff28c8e563f1a7fa304d92bbc5cf2",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-red-lentil-potato-stew.webp": {
+    "mtime": 1795466808.343,
+    "seen": 1795466867.5252595,
+    "ast_hash": "1923c8f3a23884a6919f4b273fb73ed7",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-skillet-mushrooms-tofu-potatoes.webp": {
+    "mtime": 1795466807.772,
+    "seen": 1795466867.5252595,
+    "ast_hash": "716fac77a65619aa4e29a7a58f1e2eb0",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-tofu-avocado-hummus-pistachios.webp": {
+    "mtime": 1795466807.572,
+    "seen": 1795466867.5252595,
+    "ast_hash": "f81ae4fbf7b0eba2e8241ac4d0489541",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-tofu-scramble-tofucznica.webp": {
+    "mtime": 1795466808.272,
+    "seen": 1795466867.5252595,
+    "ast_hash": "f2e688bbfbf65d380184cb8f426bdfa6",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/polish-tomato-rice-tofu-carrots.webp": {
+    "mtime": 1795466807.237,
+    "seen": 1795466867.5252595,
+    "ast_hash": "876e031e21ef7550e61809f9ba33225e",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/red-lentil-tomato-stew-rice.webp": {
+    "mtime": 1795466808.469,
+    "seen": 1795466867.5252595,
+    "ast_hash": "d48d0f1d3e949e92458b3af65127110a",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/spanish-lentejas-estofadas.webp": {
+    "mtime": 1795466809.172,
+    "seen": 1795466867.5252595,
+    "ast_hash": "a80f1d78eed5d826805db6de8d5c899e",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/spanish-pan-con-tomate.webp": {
+    "mtime": 1795466809.103,
+    "seen": 1795466867.5252595,
+    "ast_hash": "21d9e4f1043f1f8295ed383774748b1d",
+    "semantic_hash": ""
+  },
+  "mealplanner/public/assets/recipes/vegan-apple-banana-porridge.webp": {
+    "mtime": 1795466808.407,
+    "seen": 1795466867.5252595,
+    "ast_hash": "d7fc221dab138ee1a44a586b6d2f030d",
     "semantic_hash": ""
   },
   "mealplanner/package-lock.json": {

@@ -21,7 +21,13 @@ import {
   Recipe,
   RegionCode,
   CurrencyCode,
+  BiedronkaProductDetail,
 } from '../../shared/types';
+import { formatWarsawObservationTimestamp } from '../../shared/dateFormat';
+import {
+  resolvePolicyEffectivePrice,
+  shouldShowPromoIndicators,
+} from '../../shared/pricingPolicy';
 import { AppStatePayload } from '../api/clientApi';
 import { formatPln, translations } from '../../shared/i18n';
 import {
@@ -262,9 +268,9 @@ export const AppModals: React.FC<ModalProps> = ({
                           az: 'Market Qiymət Müqayisəsi: Bravo və Araz',
                         })
                       : pickLocalizedText(lang, {
-                          en: 'Supermarket Price Engine: Biedronka vs Lidl',
-                          pl: 'Porównywarka Cen: Biedronka vs Lidl',
-                          az: 'Market Qiymət Müqayisəsi: Biedronka və Lidl',
+                          en: 'Supermarket Price Engine: Biedronka (Warsaw • Glovo)',
+                          pl: 'Cennik Sklepu: Biedronka (Warszawa • Glovo)',
+                          az: 'Market Qiymətləri: Biedronka (Varşava • Glovo)',
                         })}
                   </h3>
                   <div style={{ fontSize: 11, color: '#647067' }}>
@@ -330,7 +336,9 @@ export const AppModals: React.FC<ModalProps> = ({
                         <div style={{ fontSize: 13, fontWeight: 900, marginTop: 2 }}>
                           {comp ? formatPln(comp.totalBasketPln, activeCurrency) : '—'}
                         </div>
-                        {comp && comp.savingsVsRegularPln > 0 && (
+                        {shouldShowPromoIndicators(activeRegion, st) &&
+                          comp &&
+                          comp.savingsVsRegularPln > 0 && (
                           <div style={{ fontSize: 9.5, opacity: 0.88 }}>
                             {pickLocalizedText(lang, {
                               en: 'Save',
@@ -729,8 +737,17 @@ export const AppModals: React.FC<ModalProps> = ({
                             {primaryLeft ? (
                               <>
                                 <div style={{ fontSize: 13.5, fontWeight: 900, marginTop: 2 }}>
-                                  {formatPln(primaryLeft.effectivePricePln, activeCurrency)}{' '}
-                                  {primaryLeft.promoPricePln && (
+                                  {formatPln(
+                                    resolvePolicyEffectivePrice(
+                                      primaryLeft.regularPricePln,
+                                      primaryLeft.promoPricePln,
+                                      activeRegion,
+                                      primaryLeft.supermarketId
+                                    ),
+                                    activeCurrency
+                                  )}{' '}
+                                  {shouldShowPromoIndicators(activeRegion, primaryLeft.supermarketId) &&
+                                    primaryLeft.promoPricePln && (
                                     <span style={{ textDecoration: 'line-through', color: '#9CA3AF', fontSize: 11 }}>
                                       {formatPln(primaryLeft.regularPricePln, activeCurrency)}
                                     </span>
@@ -773,8 +790,17 @@ export const AppModals: React.FC<ModalProps> = ({
                             {primaryRight ? (
                               <>
                                 <div style={{ fontSize: 13.5, fontWeight: 900, marginTop: 2 }}>
-                                  {formatPln(primaryRight.effectivePricePln, activeCurrency)}{' '}
-                                  {primaryRight.promoPricePln && (
+                                  {formatPln(
+                                    resolvePolicyEffectivePrice(
+                                      primaryRight.regularPricePln,
+                                      primaryRight.promoPricePln,
+                                      activeRegion,
+                                      primaryRight.supermarketId
+                                    ),
+                                    activeCurrency
+                                  )}{' '}
+                                  {shouldShowPromoIndicators(activeRegion, primaryRight.supermarketId) &&
+                                    primaryRight.promoPricePln && (
                                     <span style={{ textDecoration: 'line-through', color: '#9CA3AF', fontSize: 11 }}>
                                       {formatPln(primaryRight.regularPricePln, activeCurrency)}
                                     </span>
@@ -2631,6 +2657,426 @@ export const AppModals: React.FC<ModalProps> = ({
               </button>
             </div>
           </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export interface BiedronkaProductDetailModalProps {
+  lang: Language;
+  isOpen: boolean;
+  loading: boolean;
+  detail: BiedronkaProductDetail | null;
+  currencyCode: CurrencyCode;
+  isGlovoProduct: boolean;
+  isDemoPrice: boolean;
+  isPriced: boolean;
+  onClose: () => void;
+  onRetry?: () => void;
+}
+
+export const BiedronkaProductDetailModal: React.FC<BiedronkaProductDetailModalProps> = ({
+  lang,
+  isOpen,
+  loading,
+  detail,
+  currencyCode,
+  isGlovoProduct,
+  isDemoPrice,
+  isPriced,
+  onClose,
+  onRetry,
+}) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isOpen, onClose]);
+
+  if (!isOpen || !detail) return null;
+
+  const observedLabel = formatWarsawObservationTimestamp(detail.priceObservedAt, lang);
+  const retryAfterLabel = formatWarsawObservationTimestamp(detail.retryAfterAt, lang);
+  const notProvidedLabel = pickLocalizedText(lang, {
+    en: 'Not provided by Glovo source',
+    pl: 'Brak danych w źródle Glovo',
+    az: 'Glovo mənbəyində göstərilməyib',
+  });
+  const isTransientOrOffline =
+    detail.detailStatus === 'RATE_LIMITED' ||
+    detail.detailStatus === 'UPSTREAM_ERROR' ||
+    detail.detailStatus === 'OFFLINE_UNAVAILABLE' ||
+    detail.detailStatus === 'MISSING_IDENTITY';
+
+  return (
+    <div
+      className="mp-modal-backdrop mp-product-detail-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="biedronka-detail-title"
+      data-testid="modal-biedronka-product-detail"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="mp-modal-card mp-product-detail-card">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 10,
+            marginBottom: 10,
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#196431', textTransform: 'uppercase' }}>
+              {[detail.sourceName, detail.storeLocation].filter(Boolean).join(' • ')}
+            </div>
+            <h3
+              id="biedronka-detail-title"
+              data-testid="biedronka-detail-name"
+              style={{ fontSize: 15, fontWeight: 800, color: '#132A19', margin: '3px 0 0', lineHeight: 1.3 }}
+            >
+              {detail.namePl}
+            </h3>
+            {detail.packageLabelPl && (
+              <div
+                data-testid="biedronka-detail-package"
+                style={{ fontSize: 11.5, color: '#4B5563', marginTop: 2, fontWeight: 700 }}
+              >
+                {isGlovoProduct
+                  ? pickLocalizedText(lang, { en: 'Package:', pl: 'Opakowanie:', az: 'Qablaşdırma:' })
+                  : pickLocalizedText(lang, { en: 'Shopping quantity:', pl: 'Ilość do kupienia:', az: 'Alınacaq miqdar:' })}{' '}
+                {detail.packageLabelPl}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="mp-icon-btn"
+            aria-label={pickLocalizedText(lang, { en: 'Close product details', pl: 'Zamknij szczegóły produktu', az: 'Məhsul məlumatlarını bağla' })}
+            data-testid="btn-close-biedronka-detail"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Price per pack & exact Europe/Warsaw observation timestamp */}
+        <div
+          data-testid="biedronka-detail-price-box"
+          style={{
+            background: '#F2F9F4',
+            border: '1px solid #CBE4D2',
+            borderRadius: 12,
+            padding: '10px 12px',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: '#164A26' }}>
+              {isDemoPrice
+                ? pickLocalizedText(lang, {
+                    en: 'Demo catalog price',
+                    pl: 'Cena z katalogu demonstracyjnego',
+                    az: 'Demo kataloq qiyməti',
+                  })
+                : isGlovoProduct
+                ? pickLocalizedText(lang, {
+                    en: 'Verified pack price',
+                    pl: 'Zweryfikowana cena za opakowanie',
+                    az: 'Təsdiqlənmiş paket qiyməti',
+                  })
+                : pickLocalizedText(lang, { en: 'Price per pack', pl: 'Cena za opakowanie', az: 'Paket qiyməti' })}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              {(() => {
+                const detailRegion = currencyCode === 'AZN' ? 'AZ' : 'PL';
+                const showDetailPromo = shouldShowPromoIndicators(detailRegion, 'biedronka');
+                const displayedPackPrice = resolvePolicyEffectivePrice(
+                  detail.regularPricePln,
+                  detail.promoPricePln,
+                  detailRegion,
+                  'biedronka'
+                );
+                return (
+                  <>
+                    {showDetailPromo &&
+                      detail.promoPricePln !== null &&
+                      detail.regularPricePln > displayedPackPrice + 0.005 && (
+                        <span style={{ fontSize: 11.5, color: '#64748B', textDecoration: 'line-through' }}>
+                          {formatPln(detail.regularPricePln, currencyCode)}
+                        </span>
+                      )}
+                    <strong data-testid="biedronka-detail-price" style={{ fontSize: 16, color: '#132A19' }}>
+                      {isPriced
+                        ? formatPln(displayedPackPrice, currencyCode)
+                        : pickLocalizedText(lang, { en: 'Unpriced', pl: 'Brak ceny', az: 'Qiymətsiz' })}
+                    </strong>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+          {isGlovoProduct && (
+            <>
+              <div
+                data-testid="biedronka-detail-observed-at"
+                style={{ fontSize: 10.5, color: '#334155', marginTop: 4 }}
+              >
+                {observedLabel
+                  ? pickLocalizedText(lang, {
+                      en: `Price observed: ${observedLabel}`,
+                      pl: `Cena zaobserwowana: ${observedLabel}`,
+                      az: `Qiymət müşahidə tarixi: ${observedLabel}`,
+                    })
+                  : pickLocalizedText(lang, {
+                      en: 'Price observation time: Unknown (legacy record)',
+                      pl: 'Czas obserwacji ceny: Nieznany (starszy wpis)',
+                      az: 'Qiymət müşahidə vaxtı: Naməlum (köhnə qeyd)',
+                    })}
+              </div>
+              <div style={{ fontSize: 9.5, color: '#64748B', marginTop: 3, wordBreak: 'break-all' }}>
+                SKU: <span data-testid="biedronka-detail-sku">{detail.sku}</span>
+                {detail.productId && (
+                  <>
+                    {' '}
+                    • ID: <span data-testid="biedronka-detail-product-id">{detail.productId}</span>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {loading && (
+          <div
+            data-testid="biedronka-detail-loading"
+            style={{
+              padding: '10px 12px',
+              background: '#F8FAFC',
+              border: '1px solid #E2E8F0',
+              borderRadius: 10,
+              fontSize: 12,
+              color: '#334155',
+              marginBottom: 12,
+            }}
+          >
+            {pickLocalizedText(lang, {
+              en: 'Loading verified product details from Glovo Warsaw…',
+              pl: 'Ładowanie szczegółów produktu z Glovo Warszawa…',
+              az: 'Glovo Varşava məhsul məlumatları yüklənir…',
+            })}
+          </div>
+        )}
+
+        {/* Distinct status banner for transient error / rate-limit / offline / cached */}
+        {!loading && isTransientOrOffline && (
+          <div
+            data-testid="biedronka-detail-status-banner"
+            style={{
+              background: detail.detailStatus === 'RATE_LIMITED' ? '#FFFBEB' : '#FEF2F2',
+              border: `1px solid ${detail.detailStatus === 'RATE_LIMITED' ? '#FDE68A' : '#FECACA'}`,
+              color: detail.detailStatus === 'RATE_LIMITED' ? '#92400E' : '#991B1B',
+              borderRadius: 10,
+              padding: '8px 10px',
+              fontSize: 11,
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontWeight: 800 }}>
+              {detail.detailStatus === 'RATE_LIMITED'
+                ? pickLocalizedText(lang, {
+                    en: 'Glovo temporarily rate-limited product details (HTTP 429)',
+                    pl: 'Glovo tymczasowo ograniczyło zapytania (HTTP 429)',
+                    az: 'Glovo sorğuları müvəqqəti məhdudlaşdırılıb (HTTP 429)',
+                  })
+                : detail.detailStatus === 'OFFLINE_UNAVAILABLE'
+                ? pickLocalizedText(lang, {
+                    en: 'Offline — detailed label data is not cached on this device',
+                    pl: 'Tryb offline — szczegółowe dane etykiety nie są zapisane w pamięci podręcznej',
+                    az: 'Oflayn — ətraflı etiket məlumatları bu cihazda keşlənməyib',
+                  })
+                : detail.detailStatus === 'MISSING_IDENTITY'
+                ? pickLocalizedText(lang, {
+                    en: 'Extended Glovo product identifiers unavailable for this item',
+                    pl: 'Brak identyfikatorów szczegółów produktu Glovo dla tego wpisu',
+                    az: 'Bu məhsul üçün əlavə Glovo identifikatorları mövcud deyil',
+                  })
+                : pickLocalizedText(lang, {
+                    en: 'Temporary upstream error loading product details',
+                    pl: 'Tymczasowy błąd podczas pobierania szczegółów produktu',
+                    az: 'Məhsul məlumatlarını yükləyərkən müvəqqəti xəta baş verdi',
+                  })}
+            </div>
+            {detail.detailError && <div style={{ marginTop: 2 }}>{detail.detailError}</div>}
+            {retryAfterLabel && (
+              <div style={{ marginTop: 2, fontWeight: 700 }}>
+                {pickLocalizedText(lang, {
+                  en: `Retry after: ${retryAfterLabel}`,
+                  pl: `Ponów po: ${retryAfterLabel}`,
+                  az: `Yenidən cəhd vaxtı: ${retryAfterLabel}`,
+                })}
+              </div>
+            )}
+            {onRetry && detail.detailStatus === 'UPSTREAM_ERROR' && (
+              <button
+                type="button"
+                className="mp-outline-btn"
+                style={{ marginTop: 6, padding: '4px 10px', fontSize: 10.5 }}
+                onClick={onRetry}
+              >
+                {pickLocalizedText(lang, { en: 'Retry', pl: 'Spróbuj ponownie', az: 'Yenidən cəhd et' })}
+              </button>
+            )}
+          </div>
+        )}
+
+        {!loading && detail.fromCache && detail.detailStatus === 'CACHED' && (
+          <div
+            data-testid="biedronka-detail-cached-badge"
+            style={{
+              background: '#EFF6FF',
+              border: '1px solid #BFDBFE',
+              color: '#1E40AF',
+              borderRadius: 8,
+              padding: '5px 9px',
+              fontSize: 10.5,
+              fontWeight: 700,
+              marginBottom: 10,
+            }}
+          >
+            {pickLocalizedText(lang, {
+              en: 'Showing cached verified Glovo details (available offline)',
+              pl: 'Wyświetlono zapisane zweryfikowane dane Glovo (dostępne offline)',
+              az: 'Keşlənmiş təsdiqlənmiş Glovo məlumatları göstərilir (oflayn əlçatandır)',
+            })}
+          </div>
+        )}
+
+        {isGlovoProduct ? (
+          <>
+            {/* 1. Description */}
+            <div style={{ marginBottom: 12 }} data-testid="biedronka-detail-description-section">
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: '#132A19', marginBottom: 4 }}>
+                {pickLocalizedText(lang, { en: 'Description', pl: 'Opis produktu', az: 'Təsvir' })}
+              </div>
+              <div style={{ fontSize: 12, color: detail.description ? '#1F2937' : '#64748B', lineHeight: 1.45 }}>
+                {detail.description || notProvidedLabel}
+              </div>
+            </div>
+
+            {/* 2. Ingredients */}
+            <div style={{ marginBottom: 12 }} data-testid="biedronka-detail-ingredients-section">
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: '#132A19', marginBottom: 4 }}>
+                {pickLocalizedText(lang, { en: 'Ingredients', pl: 'Składniki', az: 'Tərkibi' })}
+              </div>
+              <div style={{ fontSize: 12, color: detail.ingredients ? '#1F2937' : '#64748B', lineHeight: 1.45 }}>
+                {detail.ingredients || notProvidedLabel}
+              </div>
+            </div>
+
+            {/* 3. Nutritional information with explicit 100g/ml basis */}
+            <div style={{ marginBottom: 12 }} data-testid="biedronka-detail-nutrition-section">
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: '#132A19', marginBottom: 4 }}>
+                {detail.nutritionBasis ||
+                  pickLocalizedText(lang, {
+                    en: 'Nutritional information per 100g/ml',
+                    pl: 'Informacje o wartościach odżywczych w 100 g/ml',
+                    az: '100 q/ml üçün qida dəyəri',
+                  })}
+              </div>
+              {detail.nutritionRows && detail.nutritionRows.length > 0 ? (
+                <div
+                  style={{
+                    border: '1px solid #E2E8F0',
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                    fontSize: 11.5,
+                  }}
+                >
+                  {detail.nutritionRows.map((row, idx) => (
+                    <div
+                      key={`${row.label}-${idx}`}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        padding: '6px 10px',
+                        paddingLeft: row.isSubRow ? 22 : 10,
+                        background: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC',
+                        borderTop: idx > 0 ? '1px solid #E2E8F0' : 'none',
+                      }}
+                    >
+                      <span style={{ color: row.isSubRow ? '#475569' : '#1E293B' }}>{row.label}</span>
+                      <strong style={{ color: '#0F172A', flexShrink: 0 }}>{row.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: '#64748B' }}>{notProvidedLabel}</div>
+              )}
+            </div>
+
+            {/* 4. Country of origin */}
+            <div style={{ marginBottom: 14 }} data-testid="biedronka-detail-origin-section">
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: '#132A19', marginBottom: 4 }}>
+                {pickLocalizedText(lang, {
+                  en: 'Country of origin',
+                  pl: 'Kraj pochodzenia',
+                  az: 'Mənşə ölkəsi',
+                })}
+              </div>
+              <div style={{ fontSize: 12, color: detail.countryOfOrigin ? '#1F2937' : '#64748B' }}>
+                {detail.countryOfOrigin || notProvidedLabel}
+              </div>
+            </div>
+
+            {/* 5. Exact optional Glovo link */}
+            {detail.glovoProductUrl && (
+              <a
+                href={detail.glovoProductUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="biedronka-detail-glovo-link"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 11,
+                  background: '#196431',
+                  color: '#FFFFFF',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  textDecoration: 'none',
+                  boxSizing: 'border-box',
+                }}
+              >
+                {pickLocalizedText(lang, {
+                  en: 'Open exact product on Glovo Warsaw (Biedronka)',
+                  pl: 'Otwórz dokładnie ten produkt w Glovo Warszawa (Biedronka)',
+                  az: 'Məhsulu Glovo Varşava (Biedronka) səhifəsində aç',
+                })}
+              </a>
+            )}
+          </>
+        ) : (
+          <p data-testid="shopping-product-details-unavailable" style={{ fontSize: 12, color: '#64748B' }}>
+            {pickLocalizedText(lang, {
+              en: 'Product label details are unavailable for this shopping item.',
+              pl: 'Szczegóły z etykiety nie są dostępne dla tej pozycji.',
+              az: 'Bu alış-veriş məhsulunun etiket məlumatları mövcud deyil.',
+            })}
+          </p>
         )}
       </div>
     </div>

@@ -62,6 +62,16 @@ export type KitchenEquipmentOption =
 
 export type CookingSkill = 'beginner' | 'intermediate' | 'advanced';
 
+export type CuisineSlug =
+  | 'italian'
+  | 'french'
+  | 'polish'
+  | 'greek'
+  | 'azerbaijani'
+  | 'spanish';
+
+export type CuisinePreference = 'any' | CuisineSlug;
+
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
 export type DifficultyLevel = 'Easy' | 'Medium' | 'Hard';
@@ -109,10 +119,12 @@ export interface UserPreferences {
   allergies: string[];
   excludedIngredients: string[];
   dislikes: string[];
+  likes?: string[];
   cookingSkill: CookingSkill;
   preferredPrepTimeMin: number;
   kitchenEquipment: string[];
   planDurationDays?: number;
+  preferredCuisine?: CuisinePreference;
   foodVibes?: FoodVibeOption[];
   customFoodVibes?: string[];
   mealsPerDay: number;
@@ -241,6 +253,7 @@ export interface Recipe {
   descriptionAz?: string;
   mealType: MealType;
   category: string;
+  cuisine?: CuisineSlug | null;
   regionSuitability?: RegionCode[];
   imageUrl: string;
   prepTimeMin: number;
@@ -292,9 +305,14 @@ export interface WeeklyPlan {
   totalMealPortionsCostPln: number;
   remainingBudgetPln: number;
   budgetUsagePercent: number;
+  hasIncompleteTotal?: boolean;
+  unpricedItemsCount?: number;
+  isRemainingBudgetVerified?: boolean;
   aiGenerationNotesPl: string;
   aiGenerationNotesEn: string;
   aiGenerationNotesAz?: string;
+  hasNoSafeRecipes?: boolean;
+  noSafeRecipeSlots?: Array<{ dayIndex: number; mealType: MealType; reason: string }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -321,6 +339,12 @@ export interface ShoppingItem {
   matchedProductNameAz?: string;
   matchedBrand: string;
   ean: string | null;
+  sku?: string | null;
+  glovoProductId?: string | null;
+  externalProductId?: string | null;
+  storeProductId?: string | null;
+  glovoProductUrl?: string | null;
+  priceObservedAt?: string | null;
   recommendedPackages: number;
   packageSizeLabel: string;
   totalPurchasedAmount: number;
@@ -330,6 +354,11 @@ export interface ShoppingItem {
   unitPriceLabel: string;
   regularLineTotalPln: number;
   lineTotalPln: number;
+  isPriced?: boolean;
+  sourceName?: string;
+  storeLocation?: string;
+  sourceUrl?: string;
+  snapshotId?: string | null;
   supermarketId: SupermarketSlug;
   priceVerificationStatus: PriceVerificationStatus;
   loyaltyRequired: boolean;
@@ -364,6 +393,8 @@ export interface ShoppingList {
   estimatedTotalPln: number;
   regularTotalWithoutPromosPln: number;
   totalSavingsPln: number;
+  hasIncompleteTotal?: boolean;
+  unpricedItemsCount?: number;
   comparisonByStore: Partial<
     Record<
       SupermarketSlug,
@@ -421,6 +452,9 @@ export interface BudgetAnalysis {
   differencePln: number;
   isOverBudget: boolean;
   usagePercent: number;
+  hasIncompleteTotal?: boolean;
+  unpricedItemsCount?: number;
+  isRemainingBudgetVerified?: boolean;
   expensiveItems: Array<{
     canonicalIngredient: string;
     namePl: string;
@@ -490,8 +524,8 @@ export interface PriceSyncRunRecord {
   id: string;
   supermarketId: SupermarketSlug;
   sourceUrl: string;
-  triggerType: 'SCHEDULED_24H' | 'STARTUP_CHECK' | 'MANUAL_API' | 'SEED_BASELINE';
-  status: 'SUCCESS' | 'PARTIAL_FALLBACK' | 'FAILED';
+  triggerType: 'SCHEDULED_24H' | 'SCHEDULED_5D' | 'STARTUP_CHECK' | 'MANUAL_API' | 'CLI_COMMAND' | 'SEED_BASELINE';
+  status: 'SUCCESS' | 'PARTIAL_FALLBACK' | 'PARTIAL_REJECTED' | 'RATE_LIMITED' | 'FAILED';
   productsChecked: number;
   productsUpdated: number;
   priceChangesRecorded: number;
@@ -500,6 +534,72 @@ export interface PriceSyncRunRecord {
   durationMs: number;
   startedAt: string;
   completedAt: string;
+}
+
+export interface BiedronkaSnapshotSummary {
+  activeSnapshotId: string | null;
+  sourceName: string;
+  storeLocation: string;
+  sourceUrl: string;
+  refreshCadenceDays: number;
+  lastActivatedAt: string | null;
+  lastAttemptedAt: string | null;
+  lastRunStatus: 'SUCCESS' | 'PARTIAL_REJECTED' | 'RATE_LIMITED' | 'FAILED' | 'NEVER_RUN';
+  nextScheduledRefreshAt: string | null;
+  isStale: boolean;
+  activeItemsCount: number;
+  matchedItemsCount: number;
+  totalSections: number;
+  succeededSections: number;
+  stagingSnapshotId?: string | null;
+  stagingCompletedSections?: number;
+  stagingTotalSections?: number;
+  stagingNextRetryAt?: string | null;
+  recentRuns: PriceSyncRunRecord[];
+}
+
+export interface BiedronkaNutritionRow {
+  label: string;
+  value: string;
+  isSubRow?: boolean;
+}
+
+export type BiedronkaDetailStatus =
+  | 'OK'
+  | 'CACHED'
+  | 'MISSING_IDENTITY'
+  | 'RATE_LIMITED'
+  | 'UPSTREAM_ERROR'
+  | 'OFFLINE_UNAVAILABLE';
+
+export interface BiedronkaProductDetail {
+  sku: string;
+  productId: string | null;
+  externalProductId: string | null;
+  storeProductId: string | null;
+  storeId: string | null;
+  storeAddressId: string | null;
+  storeSlug: 'biedronka-waw';
+  sourceName: string;
+  storeLocation: string;
+  namePl: string;
+  packageLabelPl: string | null;
+  regularPricePln: number;
+  promoPricePln: number | null;
+  effectivePricePln: number;
+  priceObservedAt: string | null;
+  imageUrl: string | null;
+  glovoProductUrl: string | null;
+  description: string | null;
+  ingredients: string | null;
+  nutritionBasis: string | null;
+  nutritionRows: BiedronkaNutritionRow[];
+  countryOfOrigin: string | null;
+  detailStatus: BiedronkaDetailStatus;
+  detailError: string | null;
+  retryAfterAt: string | null;
+  detailFetchedAt: string | null;
+  fromCache: boolean;
 }
 
 export interface PriceMonitoringSummary {
@@ -511,7 +611,7 @@ export interface PriceMonitoringSummary {
   outdatedThresholdHours: number;
   lastSuccessfulSyncAt: string | null;
   lastAttemptedSyncAt: string | null;
-  lastSyncStatus: 'SUCCESS' | 'PARTIAL_FALLBACK' | 'FAILED' | 'NEVER_RUN';
+  lastSyncStatus: 'SUCCESS' | 'PARTIAL_FALLBACK' | 'PARTIAL_REJECTED' | 'RATE_LIMITED' | 'FAILED' | 'NEVER_RUN';
   nextScheduledSyncAt: string;
   isStale: boolean;
   totalMonitoredProducts: number;

@@ -11,13 +11,21 @@ import {
 } from '../../shared/types';
 import {
   ALL_CATALOGUE_PRODUCTS,
+  getActiveVerifiedBiedronkaItemBySku,
+  getActiveVerifiedBiedronkaSnapshot,
   getCatalogueProductsForRegion,
 } from '../supermarkets/catalogueData';
 import {
   getDefaultCurrencyForRegion,
   isSupermarketInRegion,
+  resolveValidSupermarketForRegion,
   formatMoney,
 } from '../../shared/regionConfig';
+import { isIngredientHardExcluded } from '../validation/mealValidator';
+import {
+  resolvePolicyEffectivePrice,
+  shouldShowPromoIndicators,
+} from '../../shared/pricingPolicy';
 
 const LIQUID_CANONICALS = new Set(['olive_oil', 'milk', 'oat_milk', 'water', 'vinegar', 'soy_sauce']);
 
@@ -75,6 +83,15 @@ const INGREDIENT_ALIASES: Record<string, string> = {
   owsianka: 'oat_flakes',
   'platki owsiane': 'oat_flakes',
   oats: 'oat_flakes',
+  'kasza jeczmienna': 'pearl_barley',
+  'kasza perlowa': 'pearl_barley',
+  'kasza jeczmienna perlowa': 'pearl_barley',
+  'pearl barley': 'pearl_barley',
+  barley: 'pearl_barley',
+  'ryz do risotto': 'risotto_rice',
+  'ryz arborio': 'risotto_rice',
+  arborio: 'risotto_rice',
+  'risotto rice': 'risotto_rice',
   // Azerbaijani aliases (normalized ASCII equivalents of ə, ı, ö, ü, ğ, ç, ş)
   toyuq: 'chicken_breast',
   'toyuq filesi': 'chicken_breast',
@@ -108,6 +125,8 @@ const INGREDIENT_ALIASES: Record<string, string> = {
   sud: 'milk',
   yulaf: 'oat_flakes',
   'yulaf ezmesi': 'oat_flakes',
+  'arpa yarmasi': 'pearl_barley',
+  'rizotto duyusu': 'risotto_rice',
   qizilbaliq: 'salmon',
   'dana eti': 'pork_loin',
 };
@@ -283,25 +302,31 @@ export function buildSmartShoppingList(params: {
   subtractPantry: boolean;
   existingPurchasedMap?: Map<string, boolean>;
   manualItems?: ShoppingItem[];
+  hardExcludedTerms?: string[];
 }): ShoppingList {
   const {
     shoppingListId,
     userId,
     weeklyPlanId,
-    supermarketId,
     plannedMeals,
     pantryItems,
     subtractPantry,
     existingPurchasedMap = new Map(),
     manualItems = [],
+    hardExcludedTerms = [],
   } = params;
 
   const regionCode: RegionCode =
-    params.regionCode || (isSupermarketInRegion(supermarketId, 'AZ') ? 'AZ' : 'PL');
+    params.regionCode || (isSupermarketInRegion(params.supermarketId, 'AZ') ? 'AZ' : 'PL');
+  const supermarketId: SupermarketSlug = resolveValidSupermarketForRegion(
+    params.supermarketId,
+    regionCode
+  );
   const currencyCode: CurrencyCode =
     params.currencyCode || getDefaultCurrencyForRegion(regionCode);
 
   const regionalProducts = getCatalogueProductsForRegion(regionCode);
+  const activeBiedronkaSnap = regionCode === 'PL' ? getActiveVerifiedBiedronkaSnapshot() : null;
 
   const aggregated = new Map<string, AggregatedNeed>();
 
@@ -372,6 +397,22 @@ export function buildSmartShoppingList(params: {
   const generatedItems: ShoppingItem[] = [];
 
   for (const [key, need] of aggregated.entries()) {
+    // Hard-exclude any ingredient matching user allergies, dislikes, or exclusions (including compounds & onion/cebula aliases)
+    if (
+      hardExcludedTerms.length > 0 &&
+      isIngredientHardExcluded(
+        {
+          canonicalIngredient: need.canonicalIngredient,
+          namePl: need.namePl,
+          nameEn: need.nameEn,
+          nameAz: need.nameAz,
+        },
+        hardExcludedTerms
+      ).excluded
+    ) {
+      continue;
+    }
+
     const product = regionalProducts.find(
       (p) => p.canonicalIngredient.toLowerCase() === key
     );
@@ -391,49 +432,83 @@ export function buildSmartShoppingList(params: {
       continue;
     }
 
+    const fallbackStoreSlug: SupermarketSlug = regionCode === 'AZ' ? 'bravo' : 'biedronka';
+    const storePrice =
+      regionCode === 'PL'
+        ? product?.prices.biedronka
+        : product?.prices[supermarketId] || product?.prices[fallbackStoreSlug];
+
+    const isDimensionCompatible = Boolean(product && product.packageUnit === need.requiredUnit);
+    // In PL, leave ambiguous, unmatched, or dimension-incompatible items explicitly UNPRICED (never fabricate a fallback price)
+    const isPriced =
+      regionCode === 'PL'
+        ? Boolean(product && storePrice && isDimensionCompatible && storePrice.isAvailable !== false)
+        : Boolean(storePrice);
+
     let matchConfidence: MatchConfidence = 'HIGH';
-    if (!product) {
+    if (!product || !isPriced) {
       matchConfidence = 'UNCERTAIN';
-    } else if (need.hasUncertainConversion || product.packageUnit !== need.requiredUnit) {
+    } else if (need.hasUncertainConversion || !isDimensionCompatible) {
       matchConfidence = 'MEDIUM';
     }
 
-    const packageSize = product ? product.packageSize : 500;
-    const pkgCalc = calculateSupermarketPackages(netRequiredAmount, packageSize);
+    const packageSize = product && isDimensionCompatible ? product.packageSize : 500;
+    const pkgCalc = isPriced
+      ? calculateSupermarketPackages(netRequiredAmount, packageSize)
+      : { recommendedPackages: 0, totalPurchasedAmount: 0, leftoverAmount: 0 };
 
-    const defaultFallbackPrice = regionCode === 'AZ' ? 2.69 : 5.99;
-    const fallbackStoreSlug: SupermarketSlug = regionCode === 'AZ' ? 'bravo' : 'biedronka';
-    const storePrice = product?.prices[supermarketId] || product?.prices[fallbackStoreSlug];
-    const effectiveUnitPkgPrice = storePrice ? storePrice.effectivePricePln : defaultFallbackPrice;
-    const regularUnitPkgPrice = storePrice ? storePrice.regularPricePln : defaultFallbackPrice;
+    const defaultFallbackPrice = regionCode === 'AZ' ? 2.69 : 0;
+    const effectiveUnitPkgPrice =
+      isPriced && storePrice
+        ? resolvePolicyEffectivePrice(
+            storePrice.regularPricePln,
+            storePrice.promoPricePln,
+            regionCode,
+            supermarketId
+          )
+        : defaultFallbackPrice;
+    const regularUnitPkgPrice = isPriced && storePrice ? storePrice.regularPricePln : defaultFallbackPrice;
 
-    const lineTotalPln = Number((pkgCalc.recommendedPackages * effectiveUnitPkgPrice).toFixed(2));
-    const regularLineTotalPln = Number((pkgCalc.recommendedPackages * regularUnitPkgPrice).toFixed(2));
+    const lineTotalPln = isPriced
+      ? Number((pkgCalc.recommendedPackages * effectiveUnitPkgPrice).toFixed(2))
+      : 0;
+    const regularLineTotalPln = isPriced
+      ? Number((pkgCalc.recommendedPackages * regularUnitPkgPrice).toFixed(2))
+      : 0;
 
-    // Check primary alternative store within the same region
-    const altStoreId: SupermarketSlug =
+    // Check primary alternative store within the same region (none in Biedronka-only PL)
+    const altStoreId: SupermarketSlug | null =
       regionCode === 'AZ'
         ? supermarketId === 'bravo'
           ? 'araz'
           : 'bravo'
-        : supermarketId === 'biedronka'
-        ? 'lidl'
-        : 'biedronka';
-    const altPriceObj = product?.prices[altStoreId];
-    const alternativeStorePricePln = altPriceObj
-      ? Number((pkgCalc.recommendedPackages * altPriceObj.effectivePricePln).toFixed(2))
-      : null;
+        : null;
+    const altPriceObj = altStoreId ? product?.prices[altStoreId] : undefined;
+    const alternativeStorePricePln =
+      isPriced && altPriceObj
+        ? Number((pkgCalc.recommendedPackages * altPriceObj.effectivePricePln).toFixed(2))
+        : null;
 
     const itemId = `item-${shoppingListId}-${key}`;
     const isPurchased = existingPurchasedMap.get(key) ?? false;
 
     const productAzName = product?.nameAz || need.nameAz || product?.nameEn || need.nameEn;
+    const verifiedBiedronkaItem =
+      isPriced && regionCode === 'PL' && supermarketId === 'biedronka' && product?.ean
+        ? getActiveVerifiedBiedronkaItemBySku(product.ean)
+        : null;
 
     generatedItems.push({
       id: itemId,
       shoppingListId,
       canonicalIngredient: need.canonicalIngredient,
-      namePl: product ? product.namePl : need.namePl,
+      regionCode,
+      currencyCode,
+      namePl: verifiedBiedronkaItem
+        ? verifiedBiedronkaItem.namePl
+        : product && isPriced
+        ? product.namePl
+        : need.namePl,
       nameEn: product ? product.nameEn : need.nameEn,
       nameAz: productAzName,
       category: product ? product.category : need.category,
@@ -443,35 +518,71 @@ export function buildSmartShoppingList(params: {
       requiredDisplayLabel: formatBaseQuantity(need.requiredAmount, need.requiredUnit),
       pantryDeductedAmount,
       netRequiredAmount,
-      matchedProductId: product ? product.id : null,
-      matchedProductNamePl: product ? `${product.namePl} (${product.brand})` : need.namePl,
-      matchedProductNameEn: product ? `${product.nameEn} (${product.brand})` : need.nameEn,
-      matchedProductNameAz: product ? `${productAzName} (${product.brand})` : productAzName,
-      matchedBrand: product ? product.brand : regionCode === 'AZ' ? 'Yerli brend' : 'Marka własna',
-      ean: product ? product.ean : null,
+      matchedProductId: product && isPriced ? product.id : null,
+      matchedProductNamePl: verifiedBiedronkaItem
+        ? verifiedBiedronkaItem.namePl
+        : product && isPriced
+        ? `${product.namePl} (${product.brand})`
+        : need.namePl,
+      matchedProductNameEn:
+        product && isPriced ? `${product.nameEn} (${product.brand})` : need.nameEn,
+      matchedProductNameAz:
+        product && isPriced ? `${productAzName} (${product.brand})` : productAzName,
+      matchedBrand:
+        product && isPriced
+          ? product.brand
+          : regionCode === 'AZ'
+          ? 'Yerli brend'
+          : 'Niedopasowany / Unpriced',
+      ean: product && isPriced ? product.ean : null,
+      sku: verifiedBiedronkaItem
+        ? verifiedBiedronkaItem.sku
+        : product && isPriced
+        ? product.ean
+        : null,
+      glovoProductId: verifiedBiedronkaItem?.productId ?? null,
+      externalProductId: verifiedBiedronkaItem?.externalProductId ?? null,
+      storeProductId: verifiedBiedronkaItem?.storeProductId ?? null,
+      glovoProductUrl: verifiedBiedronkaItem?.glovoProductUrl ?? null,
+      // Exact per-item observation timestamp (null if legacy/unknown; never fabricated!)
+      priceObservedAt: verifiedBiedronkaItem
+        ? verifiedBiedronkaItem.observedAt ?? null
+        : null,
       recommendedPackages: pkgCalc.recommendedPackages,
-      packageSizeLabel: product
-        ? pkgCalc.recommendedPackages > 1
-          ? `${pkgCalc.recommendedPackages} × ${product.packageLabelPl}`
-          : product.packageLabelPl
-        : formatBaseQuantity(netRequiredAmount, need.requiredUnit),
+      packageSizeLabel:
+        product && isPriced
+          ? pkgCalc.recommendedPackages > 1
+            ? `${pkgCalc.recommendedPackages} × ${product.packageLabelPl}`
+            : product.packageLabelPl
+          : formatBaseQuantity(netRequiredAmount, need.requiredUnit),
       totalPurchasedAmount: pkgCalc.totalPurchasedAmount,
       leftoverAmount: pkgCalc.leftoverAmount,
       leftoverDisplayLabel: formatBaseQuantity(pkgCalc.leftoverAmount, need.requiredUnit),
-      unitPricePln: storePrice ? storePrice.unitPricePln : effectiveUnitPkgPrice,
-      unitPriceLabel: storePrice ? storePrice.unitPriceLabel : formatMoney(effectiveUnitPkgPrice, currencyCode),
+      unitPricePln: isPriced && storePrice ? storePrice.unitPricePln : 0,
+      unitPriceLabel:
+        isPriced && storePrice
+          ? storePrice.unitPriceLabel
+          : regionCode === 'PL'
+          ? 'Brak ceny / Unpriced'
+          : formatMoney(effectiveUnitPkgPrice, currencyCode),
       regularLineTotalPln,
       lineTotalPln,
+      isPriced,
+      sourceName: storePrice?.sourceName,
+      storeLocation: storePrice?.storeLocation,
+      sourceUrl: storePrice?.sourceUrl,
+      snapshotId: activeBiedronkaSnap?.snapshotId ?? null,
       supermarketId,
-      priceVerificationStatus: storePrice ? storePrice.verificationStatus : 'ESTIMATED_MARKET_AVG',
-      loyaltyRequired: storePrice ? storePrice.loyaltyRequired : false,
-      loyaltyConditionPl: storePrice ? storePrice.loyaltyConditionPl : null,
-      loyaltyConditionEn: storePrice ? storePrice.loyaltyConditionEn : null,
-      loyaltyConditionAz: storePrice?.loyaltyConditionAz ?? null,
-      promoValidUntil: storePrice ? storePrice.promoValidUntil : null,
+      priceVerificationStatus:
+        isPriced && storePrice ? storePrice.verificationStatus : 'UNAVAILABLE',
+      loyaltyRequired: isPriced && storePrice ? storePrice.loyaltyRequired : false,
+      loyaltyConditionPl: isPriced && storePrice ? storePrice.loyaltyConditionPl : null,
+      loyaltyConditionEn: isPriced && storePrice ? storePrice.loyaltyConditionEn : null,
+      loyaltyConditionAz: isPriced ? storePrice?.loyaltyConditionAz ?? null : null,
+      promoValidUntil: isPriced && storePrice ? storePrice.promoValidUntil : null,
       storeChannel: storePrice ? storePrice.storeChannel : 'PHYSICAL_STORE',
       lastUpdatedAt: storePrice ? storePrice.lastUpdatedAt : new Date().toISOString(),
-      isAvailable: storePrice?.isAvailable ?? true,
+      isAvailable: isPriced ? storePrice?.isAvailable ?? true : false,
       isOutdated: storePrice?.isOutdated ?? false,
       priceAgeHours: storePrice?.priceAgeHours ?? 0,
       matchConfidence,
@@ -482,7 +593,26 @@ export function buildSmartShoppingList(params: {
     });
   }
 
-  const allItems = [...generatedItems, ...manualItems];
+  const filteredManualItems =
+    hardExcludedTerms.length > 0
+      ? manualItems.filter(
+          (m) =>
+            !isIngredientHardExcluded(
+              {
+                canonicalIngredient: m.canonicalIngredient,
+                namePl: m.namePl,
+                nameEn: m.nameEn,
+                nameAz: m.nameAz,
+              },
+              hardExcludedTerms
+            ).excluded
+        )
+      : manualItems;
+
+  const allItems = [...generatedItems, ...filteredManualItems];
+
+  const unpricedItemsCount = allItems.filter((item) => item.isPriced === false).length;
+  const hasIncompleteTotal = unpricedItemsCount > 0;
 
   const estimatedTotalPln = Number(
     allItems.reduce((sum, item) => sum + item.lineTotalPln, 0).toFixed(2)
@@ -497,7 +627,7 @@ export function buildSmartShoppingList(params: {
   const stores: SupermarketSlug[] =
     regionCode === 'AZ'
       ? ['bravo', 'araz', 'bazarstore', 'rahat']
-      : ['biedronka', 'lidl', 'auchan', 'kaufland'];
+      : ['biedronka'];
   const comparisonByStore = {} as ShoppingList['comparisonByStore'];
 
   for (const store of stores) {
@@ -507,13 +637,23 @@ export function buildSmartShoppingList(params: {
     let missingCount = 0;
 
     for (const item of allItems) {
+      if (item.isPriced === false) {
+        missingCount++;
+        continue;
+      }
       const prod = regionalProducts.find(
         (p) => p.canonicalIngredient === item.canonicalIngredient || p.id === item.matchedProductId
       );
       const priceRec = prod?.prices[store];
       if (priceRec && priceRec.isAvailable !== false) {
         availableCount++;
-        storeTotal += item.recommendedPackages * priceRec.effectivePricePln;
+        const policyPrice = resolvePolicyEffectivePrice(
+          priceRec.regularPricePln,
+          priceRec.promoPricePln,
+          regionCode,
+          store
+        );
+        storeTotal += item.recommendedPackages * policyPrice;
         storeRegular += item.recommendedPackages * priceRec.regularPricePln;
       } else {
         if (item.isManual) {
@@ -521,9 +661,18 @@ export function buildSmartShoppingList(params: {
         } else {
           missingCount++;
         }
-        storeTotal += priceRec
-          ? item.recommendedPackages * priceRec.effectivePricePln
-          : item.lineTotalPln;
+        const fallbackPolicyPrice = priceRec
+          ? resolvePolicyEffectivePrice(
+              priceRec.regularPricePln,
+              priceRec.promoPricePln,
+              regionCode,
+              store
+            )
+          : null;
+        storeTotal +=
+          fallbackPolicyPrice !== null
+            ? item.recommendedPackages * fallbackPolicyPrice
+            : item.lineTotalPln;
         storeRegular += priceRec
           ? item.recommendedPackages * priceRec.regularPricePln
           : item.regularLineTotalPln;
@@ -556,6 +705,8 @@ export function buildSmartShoppingList(params: {
     estimatedTotalPln,
     regularTotalWithoutPromosPln,
     totalSavingsPln,
+    hasIncompleteTotal,
+    unpricedItemsCount,
     comparisonByStore,
     updatedAt: new Date().toISOString(),
   };

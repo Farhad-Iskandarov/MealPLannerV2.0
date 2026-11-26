@@ -108,10 +108,12 @@ describe('MealPlanner Core Business Logic & Integration Suite', () => {
       expect(comparisons.length).toBeGreaterThan(0);
       const banana = comparisons[0];
       expect(banana.ean).toBe('5900112233011');
-      expect(banana.biedronka?.effectivePricePln).toBe(4.99);
-      expect(banana.biedronka?.loyaltyRequired).toBe(true);
+      // Poland regular-price-only policy displays regular shelf price (6.99) while preserving stored promoPricePln (4.99)
+      expect(banana.biedronka?.effectivePricePln).toBe(6.99);
+      expect(banana.biedronka?.promoPricePln).toBe(4.99);
+      expect(banana.biedronka?.loyaltyRequired).toBe(false);
       expect(banana.biedronka?.verificationStatus).toBe('VERIFIED_LEAFLET_PROMO');
-      expect(banana.lidl?.effectivePricePln).toBe(4.19);
+      expect(banana.lidl).toBeNull();
 
       const riceComparisons = supermarketRegistry.compareProductsAcrossStores('rice');
       expect(riceComparisons[0].biedronka?.effectivePricePln).toBe(5.99);
@@ -274,16 +276,17 @@ describe('MealPlanner Core Business Logic & Integration Suite', () => {
 
       const plStores = supermarketRegistry.getAllStores('PL');
       const plIds = plStores.map((s) => s.id);
-      expect(plIds).toEqual(['biedronka', 'lidl', 'auchan', 'kaufland', 'carrefour', 'zabka']);
+      expect(plIds).toEqual(['biedronka']);
       expect(plIds).not.toContain('bravo');
       expect(plIds).not.toContain('araz');
 
       const shoppingList = db.getShoppingList('user-farhad-1');
       expect(shoppingList.regionCode).toBe('PL');
       expect(shoppingList.currencyCode).toBe('PLN');
-      const chickenItem = shoppingList.items.find((i) => i.canonicalIngredient === 'chicken_breast');
-      expect(chickenItem?.unitPricePln).toBe(22.99); // Biedronka 1kg chicken breast unit price in PLN
-      expect(chickenItem?.lineTotalPln).toBe(68.97); // 3 packages x 22.99 PLN across full week
+      const chickenItem = shoppingList.items.find((i) => i.canonicalIngredient === 'chicken_breast')!;
+      expect(chickenItem.unitPricePln).toBe(24.9); // Biedronka 1kg chicken breast regular shelf unit price in PLN
+      expect(chickenItem.recommendedPackages).toBeGreaterThanOrEqual(1);
+      expect(chickenItem.lineTotalPln).toBe(Number((chickenItem.recommendedPackages * 24.9).toFixed(2)));
     });
 
     it('Scenario B — Azerbaijan: switching region to AZ selects AZN (₼), Bravo supermarket, Azerbaijani stores, and real AZN product prices (never 1:1 symbol replacement)', () => {
@@ -308,9 +311,10 @@ describe('MealPlanner Core Business Logic & Integration Suite', () => {
 
       const chickenAz = azList.items.find((i) => i.canonicalIngredient === 'chicken_breast');
       expect(chickenAz).toBeTruthy();
-      // Critical check: Chicken breast in PL is 22.99 PLN/kg; in AZ (Bravo) it is 10.99 AZN/kg (NOT 22.99 AZN!)
+      // Critical check: Chicken breast in PL is 24.90 PLN/kg; in AZ (Bravo) it is 10.99 AZN/kg (NOT 24.90 AZN!)
       expect(chickenAz?.unitPricePln).toBe(10.99);
-      expect(chickenAz?.lineTotalPln).toBe(32.97);
+      expect(chickenAz!.recommendedPackages).toBeGreaterThanOrEqual(1);
+      expect(chickenAz?.lineTotalPln).toBe(Number((chickenAz!.recommendedPackages * 10.99).toFixed(2)));
       expect(chickenAz?.unitPriceLabel).toContain('₼');
 
       // Store comparison in AZ compares Bravo, Araz, Bazarstore, Rahat

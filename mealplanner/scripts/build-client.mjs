@@ -1,9 +1,14 @@
 import * as esbuild from 'esbuild';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const outDir = resolve(process.cwd(), 'dist/public');
 mkdirSync(outDir, { recursive: true });
+
+const publicAssetsDir = resolve(process.cwd(), 'public/assets');
+if (existsSync(publicAssetsDir)) {
+  cpSync(publicAssetsDir, resolve(outDir, 'assets'), { recursive: true });
+}
 
 await esbuild.build({
   entryPoints: ['src/client/main.tsx'],

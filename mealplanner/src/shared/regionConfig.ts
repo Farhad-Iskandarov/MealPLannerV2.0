@@ -55,8 +55,9 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyDefinition> = {
   },
 };
 
-export const POLISH_SUPERMARKET_SLUGS: PolishSupermarketSlug[] = [
-  'biedronka',
+export const POLISH_SUPERMARKET_SLUGS: PolishSupermarketSlug[] = ['biedronka'];
+
+export const LEGACY_POLISH_SUPERMARKET_SLUGS: PolishSupermarketSlug[] = [
   'lidl',
   'auchan',
   'kaufland',
@@ -85,7 +86,7 @@ export const REGIONS: Record<RegionCode, RegionDefinition> = {
     defaultWeeklyBudget: 250.0,
     minWeeklyBudget: 20.0,
     supermarketSlugs: POLISH_SUPERMARKET_SLUGS,
-    activeCatalogueSlugs: ['biedronka', 'lidl', 'auchan', 'kaufland'],
+    activeCatalogueSlugs: ['biedronka'],
     cuisineHighlightsEn: ['Polish & European staples', 'Pierogi, soups, roasted meats, oatmeal'],
     cuisineHighlightsPl: ['Kuchnia polska i europejska', 'Zupy, drób, kasze, ryż, owsianki'],
     cuisineHighlightsAz: ['Polşa və Avropa mətbəxi', 'Şorbalar, toyuq, düyü və yulaf yeməkləri'],
@@ -167,6 +168,11 @@ export function getCatalogueSupermarketsForRegion(regionCode: RegionCode): Super
   return REGIONS[regionCode].activeCatalogueSlugs;
 }
 
+export function isLegacyPolishSupermarketSlug(supermarketId: string | undefined | null): boolean {
+  if (!supermarketId) return false;
+  return (LEGACY_POLISH_SUPERMARKET_SLUGS as string[]).includes(supermarketId);
+}
+
 export function isSupermarketInRegion(
   supermarketId: string,
   regionCode: RegionCode
@@ -178,6 +184,10 @@ export function resolveValidSupermarketForRegion(
   supermarketId: string | undefined | null,
   regionCode: RegionCode
 ): SupermarketSlug {
+  if (regionCode === 'PL') {
+    // Poland rollout: Biedronka is the default and only available Polish store (including legacy saved selections)
+    return 'biedronka';
+  }
   if (supermarketId && isSupermarketInRegion(supermarketId, regionCode)) {
     return supermarketId;
   }

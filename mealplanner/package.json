@@ -8,7 +8,8 @@
     "build:client": "node scripts/build-client.mjs",
     "build": "npm run build:client && tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "refresh:biedronka-pl": "tsx scripts/refresh-biedronka-pl.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
